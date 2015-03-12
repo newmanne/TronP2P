@@ -6,6 +6,7 @@ import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.ScreenAdapter;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
 
 /**
@@ -13,6 +14,8 @@ import com.badlogic.gdx.utils.viewport.StretchViewport;
  */
 public class GameScreen extends ScreenAdapter {
 
+    public static final int PLAYER_WIDTH = 10;
+    public static final int PLAYER_HEIGHT = 10;
     private final TronP2PGame game;
     private float accumulator;
     public static final int V_WIDTH = 1920;
@@ -21,9 +24,7 @@ public class GameScreen extends ScreenAdapter {
     private final StretchViewport viewport;
 
     public static enum Direction {LEFT, RIGHT, DOWN, UP};
-    private Direction currentDirection = Direction.DOWN;
-    private int x = 500;
-    private int y = 500;
+    private PositionAndDirection positionAndDirection = new PositionAndDirection(500, 500, Direction.DOWN);
 
     public GameScreen(TronP2PGame game) {
         this.game = game;
@@ -37,16 +38,16 @@ public class GameScreen extends ScreenAdapter {
             public boolean keyDown(int keycode) {
                 switch (keycode) {
                     case Input.Keys.LEFT:
-                        currentDirection = Direction.LEFT;
+                        positionAndDirection.setDirection(Direction.LEFT);
                         break;
                     case Input.Keys.RIGHT:
-                        currentDirection = Direction.RIGHT;
+                        positionAndDirection.setDirection(Direction.RIGHT);
                         break;
                     case Input.Keys.UP:
-                        currentDirection = Direction.UP;
+                        positionAndDirection.setDirection(Direction.UP);
                         break;
                     case Input.Keys.DOWN:
-                        currentDirection = Direction.DOWN;
+                        positionAndDirection.setDirection(Direction.DOWN);
                         break;
                 }
                 return true;
@@ -61,30 +62,55 @@ public class GameScreen extends ScreenAdapter {
         accumulator += delta;
 
         // game logic
-        switch (currentDirection) {
+        switch (positionAndDirection.getDirection()) {
             case LEFT:
-                x -= 10;
+                positionAndDirection.setX(positionAndDirection.getX() - 10);
                 break;
             case RIGHT:
-                x += 10;
+                positionAndDirection.setX(positionAndDirection.getX() + 10);
                 break;
             case DOWN:
-                y -= 10;
+                positionAndDirection.setY(positionAndDirection.getY() - 10);
                 break;
             case UP:
-                y += 10;
+                positionAndDirection.setY(positionAndDirection.getY() + 10);
                 break;
         }
+
+        // scroll
+        viewport.getCamera().position.set(positionAndDirection.getX() , positionAndDirection.getY(), 0);
+
         // render
         viewport.apply();
         final ShapeRenderer shapeRenderer = game.getShapeRenderer();
         shapeRenderer.setProjectionMatrix(viewport.getCamera().combined);
+
+        drawWalls(shapeRenderer);
+
+        // draw player
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
             shapeRenderer.setColor(Color.BLUE);
-            shapeRenderer.rect(x, y, 10, 10);
+            shapeRenderer.rect(positionAndDirection.getX(), positionAndDirection.getY(), PLAYER_WIDTH, PLAYER_HEIGHT);
         shapeRenderer.end();
+    }
 
-        // TODO: scrolling
+    private void drawWalls(ShapeRenderer shapeRenderer) {
+        final int WALL_DRAW_THICKNESS = 10;
+        Vector2[] wallVertices = new Vector2[] {
+                new Vector2((-V_WIDTH / 2), (-V_HEIGHT / 2)),
+                new Vector2((V_WIDTH / 2), (-V_HEIGHT / 2)),
+                new Vector2((V_WIDTH / 2), (V_HEIGHT / 2)),
+                new Vector2((-V_WIDTH / 2), (V_HEIGHT / 2)),
+                new Vector2((-V_WIDTH / 2), (-V_HEIGHT / 2))
+        };
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(Color.WHITE);
+        for (int i = 0; i < wallVertices.length - 1; i++) {
+            // add a little bit extra to make sure the walls get fully drawn
+            final Vector2 addition = wallVertices[i+1].cpy().sub(wallVertices[i]).nor().scl(WALL_DRAW_THICKNESS / 2);
+            shapeRenderer.rectLine(wallVertices[i], wallVertices[i + 1].cpy().add(addition), WALL_DRAW_THICKNESS);
+        }
+        shapeRenderer.end();
     }
 
     @Override
