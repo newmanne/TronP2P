@@ -6,6 +6,10 @@ buildscript {
     }
 }
 
+ext {
+    jacksonVersion = "2.5.1"
+}
+
 allprojects {
     apply plugin: "eclipse"
     apply plugin: "idea"
@@ -35,6 +39,7 @@ project(":desktop") {
         compile project(":core")
         compile "com.badlogicgames.gdx:gdx-backend-lwjgl:$gdxVersion"
         compile "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+        compile "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
         compile "com.badlogicgames.gdx:gdx-tools:$gdxVersion"
     }
 }
@@ -45,6 +50,13 @@ project(":core") {
 
     dependencies {
         compile "com.badlogicgames.gdx:gdx:$gdxVersion"
+        compile "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
+        compile 'org.projectlombok:lombok:1.16.2'
+        compile 'com.google.guava:guava-parent:18.0'
+        compile "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion"
+        compile "com.fasterxml.jackson.core:jackson-core:$jacksonVersion"
+        compile "com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion"
+        compile "com.fasterxml.jackson.datatype:jackson-datatype-guava:$jacksonVersion"
     }
 }
 
