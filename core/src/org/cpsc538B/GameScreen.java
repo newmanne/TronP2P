@@ -8,26 +8,36 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 /**
  * Created by newmanne on 12/03/15.
  */
 public class GameScreen extends ScreenAdapter {
 
-    public static final int PLAYER_WIDTH = 10;
-    public static final int PLAYER_HEIGHT = 10;
     private final TronP2PGame game;
     private float accumulator;
     public static final int V_WIDTH = 1920;
     public static final int V_HEIGHT = 1080;
 
+    private final int GRID_WIDTH = 1000;
+    private final int GRID_HEIGHT = 1000;
+    private final int[][] grid = new int[GRID_WIDTH][GRID_HEIGHT];
+    private final static int GRID_SIZE = 10;
+
+    private final ImmutableMap<Integer, Color> pidToColor = ImmutableMap.of(1, Color.RED, 2, Color.BLUE);
+
+    private short pid = 1;
+
     private final StretchViewport viewport;
 
     public static enum Direction {LEFT, RIGHT, DOWN, UP};
-    private PositionAndDirection positionAndDirection = new PositionAndDirection(500, 500, Direction.DOWN);
+    private PositionAndDirection positionAndDirection;
 
     public GameScreen(TronP2PGame game) {
         this.game = game;
+        positionAndDirection = new PositionAndDirection(500, 500, Direction.DOWN);
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
     }
 
@@ -64,21 +74,22 @@ public class GameScreen extends ScreenAdapter {
         // game logic
         switch (positionAndDirection.getDirection()) {
             case LEFT:
-                positionAndDirection.setX(positionAndDirection.getX() - 10);
+                positionAndDirection.setX(Math.max(0, positionAndDirection.getX() - 1));
                 break;
             case RIGHT:
-                positionAndDirection.setX(positionAndDirection.getX() + 10);
+                positionAndDirection.setX(Math.min(GRID_WIDTH - 1, positionAndDirection.getX() + 1));
                 break;
             case DOWN:
-                positionAndDirection.setY(positionAndDirection.getY() - 10);
+                positionAndDirection.setY(Math.max(0, positionAndDirection.getY() - 1));
                 break;
             case UP:
-                positionAndDirection.setY(positionAndDirection.getY() + 10);
+                positionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
                 break;
         }
+        grid[positionAndDirection.getX()][positionAndDirection.getY()] = pid;
 
         // scroll
-        viewport.getCamera().position.set(positionAndDirection.getX() , positionAndDirection.getY(), 0);
+        viewport.getCamera().position.set(positionAndDirection.getX() * GRID_SIZE , positionAndDirection.getY() * GRID_SIZE, 0);
 
         // render
         viewport.apply();
@@ -86,22 +97,40 @@ public class GameScreen extends ScreenAdapter {
         shapeRenderer.setProjectionMatrix(viewport.getCamera().combined);
 
         drawWalls(shapeRenderer);
-
+        drawGrid(shapeRenderer);
         // draw player
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-            shapeRenderer.setColor(Color.BLUE);
-            shapeRenderer.rect(positionAndDirection.getX(), positionAndDirection.getY(), PLAYER_WIDTH, PLAYER_HEIGHT);
+            shapeRenderer.setColor(Color.WHITE);
+            shapeRenderer.rect(positionAndDirection.getX() * GRID_SIZE, positionAndDirection.getY() * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+        shapeRenderer.end();
+    }
+
+    private void drawGrid(ShapeRenderer shapeRenderer) {
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        int i = 0;
+        int j = 0;
+        for (int[] row : grid) {
+            for (int square : row) {
+                if (square != 0) {
+                    shapeRenderer.setColor(pidToColor.get(square));
+                    shapeRenderer.rect(i * GRID_SIZE, j * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+                }
+                j++;
+            }
+            j = 0;
+            i++;
+        }
         shapeRenderer.end();
     }
 
     private void drawWalls(ShapeRenderer shapeRenderer) {
         final int WALL_DRAW_THICKNESS = 10;
         Vector2[] wallVertices = new Vector2[] {
-                new Vector2((-V_WIDTH / 2), (-V_HEIGHT / 2)),
-                new Vector2((V_WIDTH / 2), (-V_HEIGHT / 2)),
-                new Vector2((V_WIDTH / 2), (V_HEIGHT / 2)),
-                new Vector2((-V_WIDTH / 2), (V_HEIGHT / 2)),
-                new Vector2((-V_WIDTH / 2), (-V_HEIGHT / 2))
+                new Vector2(0, 0),
+                new Vector2(GRID_HEIGHT * GRID_SIZE, 0),
+                new Vector2(GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE),
+                new Vector2(0, GRID_HEIGHT * GRID_SIZE),
+                new Vector2(0, 0)
         };
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         shapeRenderer.setColor(Color.WHITE);
