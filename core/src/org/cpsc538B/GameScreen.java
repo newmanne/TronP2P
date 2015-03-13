@@ -17,27 +17,43 @@ import com.google.common.collect.ImmutableMap;
 public class GameScreen extends ScreenAdapter {
 
     private final TronP2PGame game;
-    private float accumulator;
+
+    // resolution
     public static final int V_WIDTH = 1920;
     public static final int V_HEIGHT = 1080;
 
-    private final int GRID_WIDTH = 1000;
-    private final int GRID_HEIGHT = 1000;
+    // grid dimensions
+    private final int GRID_WIDTH = 600;
+    private final int GRID_HEIGHT = 600;
     private final int[][] grid = new int[GRID_WIDTH][GRID_HEIGHT];
+
+    // display size of grid
     private final static int GRID_SIZE = 10;
 
     private final ImmutableMap<Integer, Color> pidToColor = ImmutableMap.of(1, Color.RED, 2, Color.BLUE);
 
-    private short pid = 1;
+    private final int pid;
 
     private final StretchViewport viewport;
 
     public static enum Direction {LEFT, RIGHT, DOWN, UP};
     private PositionAndDirection positionAndDirection;
 
-    public GameScreen(TronP2PGame game) {
+    private float accumulator;
+
+    final int WALL_DRAW_THICKNESS = 10;
+    final Vector2[] wallVertices = new Vector2[] {
+            new Vector2(0, 0),
+            new Vector2(GRID_HEIGHT * GRID_SIZE, 0),
+            new Vector2(GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE),
+            new Vector2(0, GRID_HEIGHT * GRID_SIZE),
+            new Vector2(0, 0)
+    };
+
+    public GameScreen(TronP2PGame game, PositionAndDirection startingPosition, int pid) {
         this.game = game;
-        positionAndDirection = new PositionAndDirection(500, 500, Direction.DOWN);
+        this.positionAndDirection = startingPosition;
+        this.pid = pid;
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
     }
 
@@ -89,7 +105,7 @@ public class GameScreen extends ScreenAdapter {
         grid[positionAndDirection.getX()][positionAndDirection.getY()] = pid;
 
         // scroll
-        viewport.getCamera().position.set(positionAndDirection.getX() * GRID_SIZE , positionAndDirection.getY() * GRID_SIZE, 0);
+        viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, positionAndDirection.getX() * GRID_SIZE)), positionAndDirection.getY() * GRID_SIZE, 0);
 
         // render
         viewport.apply();
@@ -107,31 +123,20 @@ public class GameScreen extends ScreenAdapter {
 
     private void drawGrid(ShapeRenderer shapeRenderer) {
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        int i = 0;
-        int j = 0;
-        for (int[] row : grid) {
-            for (int square : row) {
+        for (int i = 0; i < grid.length; i++) {
+            int[] row = grid[i];
+            for (int j = 0; j < row.length; j++) {
+                int square = row[j];
                 if (square != 0) {
                     shapeRenderer.setColor(pidToColor.get(square));
                     shapeRenderer.rect(i * GRID_SIZE, j * GRID_SIZE, GRID_SIZE, GRID_SIZE);
                 }
-                j++;
             }
-            j = 0;
-            i++;
         }
         shapeRenderer.end();
     }
 
     private void drawWalls(ShapeRenderer shapeRenderer) {
-        final int WALL_DRAW_THICKNESS = 10;
-        Vector2[] wallVertices = new Vector2[] {
-                new Vector2(0, 0),
-                new Vector2(GRID_HEIGHT * GRID_SIZE, 0),
-                new Vector2(GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE),
-                new Vector2(0, GRID_HEIGHT * GRID_SIZE),
-                new Vector2(0, 0)
-        };
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         shapeRenderer.setColor(Color.WHITE);
         for (int i = 0; i < wallVertices.length - 1; i++) {

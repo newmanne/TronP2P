@@ -26,7 +26,7 @@ public class TronP2PGame extends Game {
         spritebatch = new SpriteBatch();
         shapeRenderer = new ShapeRenderer();
         assets = new Assets();
-        setScreen(new GameScreen(this));
+        setScreen(new GameScreen(this, new PositionAndDirection(500, 500, GameScreen.Direction.DOWN), 1));
     }
 
     @Override
