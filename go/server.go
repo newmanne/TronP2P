@@ -1,13 +1,23 @@
+package main
+
 import (
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"strings"
+//	"strconv"
 )
 
 func main() {
-	addr, err := net.ResolveUDPAddr("udp", ":11235")
+	fmt.Println("HELLO I AM STARTED");
+
+	if (len(os.Args) != 2) {
+		fmt.Println("RTFM")
+	}
+	javaPort := os.Args[1]
+	fmt.Println("Trying to connect to java on localhost:" + javaPort)
+	addr, err := net.ResolveUDPAddr("udp", ":0")
 	checkError(err)
 
 	conn, err := net.ListenUDP("udp", addr)
@@ -15,23 +25,13 @@ func main() {
 
 	buf := make([]byte, 1024)
 	for {
-		_, raddr, err := conn.ReadFromUDP(buf)
-		checkError(err)
-		fmt.Fprintf(os.Stdout, "Received packet from: %s\n", raddr)
-		buf = []byte(getFortune())
-		n, err := conn.WriteToUDP(buf, raddr)
-		fmt.Fprintf(os.Stdout, "Wrote fortune of %d bytes\n", n)
+		message := "my message"
+		buf = []byte(message)
+		raddr, _ := net.ResolveUDPAddr("udp", ":" + javaPort)
+		_, _ = conn.WriteToUDP(buf[:len(message)], raddr)
+		fmt.Println("DONE")
+		break
 	}
-}
-
-// Returns random quote of the day using the build-in fortune
-// program. If this fails, then it returns a hardcoded quote.
-func getFortune() string {
-	out, err := exec.Command("fortune", "-s").Output()
-	if err != nil {
-		return "The goal of Computer Science is to build something that will last at least until we've finished building it."
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // If error is non-nil, print it out and halt.

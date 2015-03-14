@@ -28,6 +28,8 @@ public class TronP2PGame extends Game {
     @Getter
     private StartScreen startScreen;
 
+    private Process goProcess;
+
     public final static String LOG_TAG = "TRON";
     public final static String SERVER_TAG = "SERVER";
 
@@ -57,21 +59,22 @@ public class TronP2PGame extends Game {
                 Runtime r = Runtime.getRuntime();
                 try {
                     // stuff runs from core/assets
-                    final Process start = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort())).start();
-//                    Process p = r.exec("/usr/bin/zsh go");
-//                    BufferedReader stdInput = new BufferedReader(new InputStreamReader(start.getInputStream()));
-//                    BufferedReader stdError = new BufferedReader(new InputStreamReader(start.getErrorStream()));
-//                    // read the output from the command
-//                    System.out.println("Here is the standard output of the command:\n");
-//                    String s;
-//                    while ((s = stdInput.readLine()) != null) {
-//                        System.out.println(s);
-//                    }
-//                    // read any errors from the attempted command
-//                    System.out.println("Here is the standard error of the command (if any):\n");
-//                    while ((s = stdError.readLine()) != null) {
-//                        System.out.println(s);
-//                    }
+                    goProcess = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort())).start();
+
+                    Process p = r.exec("/usr/bin/zsh go");
+                    BufferedReader stdInput = new BufferedReader(new InputStreamReader(goProcess.getInputStream()));
+                    BufferedReader stdError = new BufferedReader(new InputStreamReader(goProcess.getErrorStream()));
+                    // read the output from the command
+                    System.out.println("Here is the standard output of the command:\n");
+                    String s;
+                    while ((s = stdInput.readLine()) != null) {
+                        System.out.println(s);
+                    }
+                    // read any errors from the attempted command
+                    System.out.println("Here is the standard error of the command (if any):\n");
+                    while ((s = stdError.readLine()) != null) {
+                        System.out.println(s);
+                    }
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -85,7 +88,7 @@ public class TronP2PGame extends Game {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                    String sentence = new String(receivePacket.getData());
+                    String sentence = new String(receivePacket.getData()).trim();
                     System.out.println("RECEIVED: " + sentence);
                     InetAddress IPAddress = receivePacket.getAddress();
                     int port = receivePacket.getPort();
@@ -110,6 +113,7 @@ public class TronP2PGame extends Game {
         assets.dispose();
         shapeRenderer.dispose();
         spritebatch.dispose();
+        goProcess.destroyForcibly();
     }
 
 }
