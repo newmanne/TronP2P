@@ -61,7 +61,6 @@ public class TronP2PGame extends Game {
                     // stuff runs from core/assets
                     goProcess = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort())).start();
 
-                    Process p = r.exec("/usr/bin/zsh go");
                     BufferedReader stdInput = new BufferedReader(new InputStreamReader(goProcess.getInputStream()));
                     BufferedReader stdError = new BufferedReader(new InputStreamReader(goProcess.getErrorStream()));
                     // read the output from the command
