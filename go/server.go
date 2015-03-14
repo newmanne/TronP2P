@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
-	"strings"
-//	"strconv"
 )
 
 func main() {
