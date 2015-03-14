@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 )
 
 func main() {
@@ -26,9 +27,9 @@ func main() {
 		buf = []byte(message)
 		raddr, _ := net.ResolveUDPAddr("udp", ":" + javaPort)
 		_, _ = conn.WriteToUDP(buf[:len(message)], raddr)
-		fmt.Println("DONE")
-		break
+		time.Sleep(1 * time.Second)
 	}
+	fmt.Println("GOODBYE")
 }
 
 // If error is non-nil, print it out and halt.

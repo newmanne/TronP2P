@@ -46,7 +46,7 @@ public class TronP2PGame extends Game {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                DatagramSocket serverSocket = null;
+                final DatagramSocket serverSocket;
                 try {
                     serverSocket = new DatagramSocket(0);
                 } catch (SocketException e) {
@@ -54,29 +54,34 @@ public class TronP2PGame extends Game {
                     throw new RuntimeException("Couldn't make server", e);
                 }
                 Gdx.app.log(SERVER_TAG, "UDP server started on port " + serverSocket.getLocalPort());
-
                 // spawn go
-                Runtime r = Runtime.getRuntime();
-                try {
-                    // stuff runs from core/assets
-                    goProcess = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort())).start();
+                // stuff runs from core/assets
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
 
-                    BufferedReader stdInput = new BufferedReader(new InputStreamReader(goProcess.getInputStream()));
-                    BufferedReader stdError = new BufferedReader(new InputStreamReader(goProcess.getErrorStream()));
-                    // read the output from the command
-                    System.out.println("Here is the standard output of the command:\n");
-                    String s;
-                    while ((s = stdInput.readLine()) != null) {
-                        System.out.println(s);
+                            Runtime r = Runtime.getRuntime();
+                            goProcess = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort())).start();
+
+                            BufferedReader stdInput = new BufferedReader(new InputStreamReader(goProcess.getInputStream()));
+                            BufferedReader stdError = new BufferedReader(new InputStreamReader(goProcess.getErrorStream()));
+                            // read the output from the command
+                            System.out.println("Here is the standard output of the command:\n");
+                            String s;
+                            while ((s = stdInput.readLine()) != null) {
+                                System.out.println(s);
+                            }
+                            // read any errors from the attempted command
+                            System.out.println("Here is the standard error of the command (if any):\n");
+                            while ((s = stdError.readLine()) != null) {
+                                System.out.println(s);
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                     }
-                    // read any errors from the attempted command
-                    System.out.println("Here is the standard error of the command (if any):\n");
-                    while ((s = stdError.readLine()) != null) {
-                        System.out.println(s);
-                    }
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                }).start();
 
                 byte[] receiveData = new byte[1024];
                 byte[] sendData = new byte[1024];
