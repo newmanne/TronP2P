@@ -9,6 +9,14 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import lombok.Getter;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.SocketException;
+
 public class TronP2PGame extends Game {
 
     @Getter
@@ -17,8 +25,12 @@ public class TronP2PGame extends Game {
     private ShapeRenderer shapeRenderer;
     @Getter
     private Assets assets;
+    @Getter
+    private StartScreen startScreen;
 
     public final static String LOG_TAG = "TRON";
+    public final static String SERVER_TAG = "SERVER";
+
 
     @Override
     public void create() {
@@ -26,7 +38,71 @@ public class TronP2PGame extends Game {
         spritebatch = new SpriteBatch();
         shapeRenderer = new ShapeRenderer();
         assets = new Assets();
-        setScreen(new GameScreen(this, new PositionAndDirection(500, 500, GameScreen.Direction.DOWN), 1));
+        startScreen = new StartScreen(this);
+
+        // spawn server
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                DatagramSocket serverSocket = null;
+                try {
+                    serverSocket = new DatagramSocket(0);
+                } catch (SocketException e) {
+                    e.printStackTrace();
+                    throw new RuntimeException("Couldn't make server", e);
+                }
+                Gdx.app.log(SERVER_TAG, "UDP server started on port " + serverSocket.getLocalPort());
+
+                // spawn go
+                Runtime r = Runtime.getRuntime();
+                try {
+                    // stuff runs from core/assets
+                    final Process start = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort())).start();
+//                    Process p = r.exec("/usr/bin/zsh go");
+//                    BufferedReader stdInput = new BufferedReader(new InputStreamReader(start.getInputStream()));
+//                    BufferedReader stdError = new BufferedReader(new InputStreamReader(start.getErrorStream()));
+//                    // read the output from the command
+//                    System.out.println("Here is the standard output of the command:\n");
+//                    String s;
+//                    while ((s = stdInput.readLine()) != null) {
+//                        System.out.println(s);
+//                    }
+//                    // read any errors from the attempted command
+//                    System.out.println("Here is the standard error of the command (if any):\n");
+//                    while ((s = stdError.readLine()) != null) {
+//                        System.out.println(s);
+//                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                byte[] receiveData = new byte[1024];
+                byte[] sendData = new byte[1024];
+                while (true) {
+                    DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
+                    try {
+                        serverSocket.receive(receivePacket);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    String sentence = new String(receivePacket.getData());
+                    System.out.println("RECEIVED: " + sentence);
+                    InetAddress IPAddress = receivePacket.getAddress();
+                    int port = receivePacket.getPort();
+                    String capitalizedSentence = sentence.toUpperCase();
+                    sendData = capitalizedSentence.getBytes();
+                    DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, IPAddress, port);
+                    try {
+                        serverSocket.send(sendPacket);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+            }
+        }).start();
+
+        setScreen(startScreen);
     }
 
     @Override

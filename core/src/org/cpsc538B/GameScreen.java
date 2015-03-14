@@ -16,6 +16,7 @@ import com.google.common.collect.ImmutableMap;
  */
 public class GameScreen extends ScreenAdapter {
 
+    private static final int UNOCCUPIED = 0;
     private final TronP2PGame game;
 
     // resolution
@@ -101,6 +102,10 @@ public class GameScreen extends ScreenAdapter {
             case UP:
                 positionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
                 break;
+        }
+        if (grid[positionAndDirection.getX()][positionAndDirection.getY()] != UNOCCUPIED) {
+            // collision
+            game.setScreen(game.getStartScreen());
         }
         grid[positionAndDirection.getX()][positionAndDirection.getY()] = pid;
 
