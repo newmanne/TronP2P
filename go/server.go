@@ -25,9 +25,14 @@ func main() {
 	for {
 		message := "my message"
 		buf = []byte(message)
-		raddr, _ := net.ResolveUDPAddr("udp", ":" + javaPort)
-		_, _ = conn.WriteToUDP(buf[:len(message)], raddr)
+		raddr, err := net.ResolveUDPAddr("udp", "localhost:" + javaPort)
+		checkError(err)
+
+		_, err = conn.WriteToUDP(buf[:len(message)], raddr)
+		checkError(err)
+
 		time.Sleep(1 * time.Second)
+		break
 	}
 	fmt.Println("GOODBYE")
 }
