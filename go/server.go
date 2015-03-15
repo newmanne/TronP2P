@@ -10,7 +10,7 @@ import (
 func main() {
 	fmt.Println("HELLO I AM STARTED");
 
-	if (len(os.Args) != 2) {
+	if (len(os.Args) != 3) {
 		fmt.Println("RTFM")
 	}
 	javaPort := os.Args[1]

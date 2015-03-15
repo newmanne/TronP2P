@@ -8,8 +8,9 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+
+import java.util.Collection;
 
 /**
  * Created by newmanne on 12/03/15.
@@ -37,13 +38,16 @@ public class GameScreen extends ScreenAdapter {
 
     private final StretchViewport viewport;
 
-    public static enum Direction {LEFT, RIGHT, DOWN, UP};
+    public static enum Direction {LEFT, RIGHT, DOWN, UP}
+
+    ;
     private PositionAndDirection positionAndDirection;
 
     private float accumulator;
+    private PositionAndDirection provisionalPositionAndDirection;
 
     final int WALL_DRAW_THICKNESS = 10;
-    final Vector2[] wallVertices = new Vector2[] {
+    final Vector2[] wallVertices = new Vector2[]{
             new Vector2(0, 0),
             new Vector2(GRID_HEIGHT * GRID_SIZE, 0),
             new Vector2(GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE),
@@ -54,6 +58,7 @@ public class GameScreen extends ScreenAdapter {
     public GameScreen(TronP2PGame game, PositionAndDirection startingPosition, int pid) {
         this.game = game;
         this.positionAndDirection = startingPosition;
+        provisionalPositionAndDirection = new PositionAndDirection(this.positionAndDirection);
         this.pid = pid;
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
     }
@@ -84,30 +89,45 @@ public class GameScreen extends ScreenAdapter {
 
     @Override
     public void render(float delta) {
+        final Collection<Object> goEvents = game.getGoSender().getGoEvents();
+        for (Object event : goEvents) {
+            if (event instanceof GoSender.RoundStartEvent) {
+                game.getGoSender().sendToGo(new GoSender.MoveEvent(positionAndDirection, pid));
+            } else if (event instanceof GoSender.MovesEvent) {
+                // process moves
+                for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoveEvents()) {
+                    PositionAndDirection move = moveEvent.getPositionAndDirection();
+                    grid[move.getX()][move.getX()] = moveEvent.getPid();
+                    // if the move is me
+                    if (moveEvent.getPid() == pid) {
+                        positionAndDirection = moveEvent.getPositionAndDirection();
+                    }
+                }
+            } else {
+                throw new IllegalStateException();
+            }
+        }
+
         GameUtils.clearScreen();
 
         accumulator += delta;
 
         // game logic
+        // figure out what the next move should be. This doesn't actually move you.
         switch (positionAndDirection.getDirection()) {
             case LEFT:
-                positionAndDirection.setX(Math.max(0, positionAndDirection.getX() - 1));
+                provisionalPositionAndDirection.setX(Math.max(0, positionAndDirection.getX() - 1));
                 break;
             case RIGHT:
-                positionAndDirection.setX(Math.min(GRID_WIDTH - 1, positionAndDirection.getX() + 1));
+                provisionalPositionAndDirection.setX(Math.min(GRID_WIDTH - 1, positionAndDirection.getX() + 1));
                 break;
             case DOWN:
-                positionAndDirection.setY(Math.max(0, positionAndDirection.getY() - 1));
+                provisionalPositionAndDirection.setY(Math.max(0, positionAndDirection.getY() - 1));
                 break;
             case UP:
-                positionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
+                provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
                 break;
         }
-        if (grid[positionAndDirection.getX()][positionAndDirection.getY()] != UNOCCUPIED) {
-            // collision
-            game.setScreen(game.getStartScreen());
-        }
-        grid[positionAndDirection.getX()][positionAndDirection.getY()] = pid;
 
         // scroll
         viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, positionAndDirection.getX() * GRID_SIZE)), positionAndDirection.getY() * GRID_SIZE, 0);
@@ -121,8 +141,8 @@ public class GameScreen extends ScreenAdapter {
         drawGrid(shapeRenderer);
         // draw player
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-            shapeRenderer.setColor(Color.WHITE);
-            shapeRenderer.rect(positionAndDirection.getX() * GRID_SIZE, positionAndDirection.getY() * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+        shapeRenderer.setColor(Color.WHITE);
+        shapeRenderer.rect(positionAndDirection.getX() * GRID_SIZE, positionAndDirection.getY() * GRID_SIZE, GRID_SIZE, GRID_SIZE);
         shapeRenderer.end();
     }
 
@@ -146,7 +166,7 @@ public class GameScreen extends ScreenAdapter {
         shapeRenderer.setColor(Color.WHITE);
         for (int i = 0; i < wallVertices.length - 1; i++) {
             // add a little bit extra to make sure the walls get fully drawn
-            final Vector2 addition = wallVertices[i+1].cpy().sub(wallVertices[i]).nor().scl(WALL_DRAW_THICKNESS / 2);
+            final Vector2 addition = wallVertices[i + 1].cpy().sub(wallVertices[i]).nor().scl(WALL_DRAW_THICKNESS / 2);
             shapeRenderer.rectLine(wallVertices[i], wallVertices[i + 1].cpy().add(addition), WALL_DRAW_THICKNESS);
         }
         shapeRenderer.end();

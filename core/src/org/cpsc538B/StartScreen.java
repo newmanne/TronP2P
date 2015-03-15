@@ -1,14 +1,24 @@
 package org.cpsc538B;
 
+import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.ScreenAdapter;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.SocketException;
 
 
 /**
@@ -28,17 +38,21 @@ public class StartScreen extends ScreenAdapter {
         stage.addActor(rootTable);
 
         // stuff
-        Label label = new Label("TRON", game.getAssets().getLargeLabelStyle());
-        rootTable.add(label);
-        label.addListener(new ClickListener() {
-            @Override
-            public void clicked(InputEvent event, float x, float y) {
-                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(500, 500, GameScreen.Direction.DOWN), 1));
-            }
-        });
+        Label logo = new Label("TRON", game.getAssets().getLargeLabelStyle());
+        rootTable.add(logo);
         rootTable.row();
         TextField ipField = new TextField("IP", game.getAssets().getSkin());
         rootTable.add(ipField);
+        rootTable.row();
+        final TextButton textButton = new TextButton("START", game.getAssets().getSkin());
+        rootTable.add(textButton);
+        textButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                StartScreen.this.game.getGoSender().init(textButton.getText().toString());
+                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(500, 500, GameScreen.Direction.DOWN), 1));
+            }
+        });
     }
 
     @Override
@@ -66,7 +80,5 @@ public class StartScreen extends ScreenAdapter {
     public void dispose() {
         stage.dispose();
     }
-
-
 
 }
