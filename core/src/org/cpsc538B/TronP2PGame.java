@@ -32,6 +32,8 @@ public class TronP2PGame extends Game {
 
     public final static String LOG_TAG = "TRON";
     public final static String SERVER_TAG = "SERVER";
+    public final static String GO_STDOUT_TAG = "GO_STDOUT";
+    public final static String GO_STDERR_TAG = "GO_STDERR";
 
     @Override
     public void create() {

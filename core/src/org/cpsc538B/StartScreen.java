@@ -39,20 +39,34 @@ public class StartScreen extends ScreenAdapter {
 
         // stuff
         Label logo = new Label("TRON", game.getAssets().getLargeLabelStyle());
-        rootTable.add(logo);
-        rootTable.row();
-        TextField ipField = new TextField("IP", game.getAssets().getSkin());
-        rootTable.add(ipField);
-        rootTable.row();
-        final TextButton textButton = new TextButton("START", game.getAssets().getSkin());
-        rootTable.add(textButton);
-        textButton.addListener(new ClickListener() {
+        final TextField leaderIpField = new TextField("IP", game.getAssets().getSkin());
+        final TextButton startAGame = new TextButton("START A GAME", game.getAssets().getSkin());
+        final TextButton joinAGame = new TextButton("JOIN A GAME", game.getAssets().getSkin());
+
+        startAGame.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                StartScreen.this.game.getGoSender().init(textButton.getText().toString());
+                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), true);
+                // TODO: can't really assign these positions just yet
                 StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(10, 10, GameScreen.Direction.DOWN), 1));
             }
         });
+        joinAGame.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), false);
+                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(10, 10, GameScreen.Direction.DOWN), 1));
+            }
+        });
+
+        // menu positioning
+        rootTable.add(logo);
+        rootTable.row();
+        rootTable.add(leaderIpField);
+        rootTable.row();
+        rootTable.add(joinAGame);
+        rootTable.row();
+        rootTable.add(startAGame);
     }
 
     @Override

@@ -34,81 +34,71 @@ import java.util.concurrent.SynchronousQueue;
 public class GoSender implements Disposable {
 
     private Process goProcess;
-    private final Queue<Object> goEvents = new ArrayBlockingQueue<Object>(20);
+    private final Queue<Object> goEvents = new ArrayBlockingQueue<>(20);
     private InetAddress goAddress;
     private DatagramSocket serverSocket;
     private int goPort;
 
-    void init(final String masterAddress) {
+    void init(final String masterAddress, final boolean leader) {
         // spawn server
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                final DatagramSocket serverSocket;
-                try {
-                    serverSocket = new DatagramSocket(0);
-                } catch (SocketException e) {
-                    e.printStackTrace();
-                    throw new RuntimeException("Couldn't make server", e);
-                }
-                Gdx.app.log(TronP2PGame.SERVER_TAG, "UDP server started on port " + serverSocket.getLocalPort());
-                GoSender.this.serverSocket = serverSocket;
-                // spawn go
-                // stuff runs from core/assets
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
+        try {
+            serverSocket = new DatagramSocket(0);
+        } catch (SocketException e) {
+            e.printStackTrace();
+            throw new RuntimeException("Couldn't make server", e);
+        }
+        Gdx.app.log(TronP2PGame.SERVER_TAG, "UDP server started on port " + serverSocket.getLocalPort());
 
-                            Runtime r = Runtime.getRuntime();
-                            goProcess = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress).start();
+        // spawn go
+        // stuff runs from core/assets
+        new Thread(() -> {
+            try {
+                Runtime r = Runtime.getRuntime();
+                goProcess = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader)).start();
 
-                            BufferedReader stdInput = new BufferedReader(new InputStreamReader(goProcess.getInputStream()));
-                            BufferedReader stdError = new BufferedReader(new InputStreamReader(goProcess.getErrorStream()));
-                            // read the output from the command
-                            System.out.println("Here is the standard output of the command:\n");
-                            String s;
-                            while ((s = stdInput.readLine()) != null) {
-                                System.out.println("GO: " + s);
-                            }
-                            // read any errors from the attempted command
-                            System.out.println("Here is the standard error of the command (if any):\n");
-                            while ((s = stdError.readLine()) != null) {
-                                System.out.println("GO: " + s);
-                            }
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                    }
-                }).start();
-
-                // server stuff
-                byte[] receiveData = new byte[2048];
-
+                BufferedReader stdInput = new BufferedReader(new InputStreamReader(goProcess.getInputStream()));
+                BufferedReader stdError = new BufferedReader(new InputStreamReader(goProcess.getErrorStream()));
+                String stdout = null;
+                String stderr = null;
                 while (true) {
-                    DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
-                    try {
-                        serverSocket.receive(receivePacket);
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                    while ((stdout = stdInput.readLine()) != null) {
+                        Gdx.app.log(TronP2PGame.GO_STDOUT_TAG, stdout);
                     }
-                    String sentence = new String(receivePacket.getData()).trim();
-                    System.out.println("RECEIVED: " + sentence);
-                    try {
-                        goPort = receivePacket.getPort();
-                        goAddress = receivePacket.getAddress();
-                        final JsonNode jsonNode = JSONUtils.getMapper().readTree(sentence);
-                        final String name = jsonNode.get("eventName").asText();
-                        Gdx.app.log(TronP2PGame.SERVER_TAG, "Event recieved is of type " + name);
-                        final Object event = JSONUtils.getMapper().treeToValue(jsonNode.get(name), nameToEvent.get(name));
-                        goEvents.add(event);
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                    while ((stderr = stdError.readLine()) != null) {
+                        Gdx.app.log(TronP2PGame.GO_STDERR_TAG, stderr);
                     }
                 }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }).start();
 
+        // server stuff
+        new Thread(() -> {
+            byte[] receiveData = new byte[2048];
+
+            while (true) {
+                DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
+                try {
+                    serverSocket.receive(receivePacket);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                String sentence = new String(receivePacket.getData()).trim();
+                System.out.println("RECEIVED: " + sentence);
+                try {
+                    goPort = receivePacket.getPort();
+                    goAddress = receivePacket.getAddress();
+                    final JsonNode jsonNode = JSONUtils.getMapper().readTree(sentence);
+                    final String name = jsonNode.get("eventName").asText();
+                    Gdx.app.log(TronP2PGame.SERVER_TAG, "Event recieved is of type " + name);
+                    final Object event = JSONUtils.getMapper().treeToValue(jsonNode.get(name), nameToEvent.get(name));
+                    goEvents.add(event);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
     }
 
     public void sendToGo(Object event) {
@@ -148,7 +138,9 @@ public class GoSender implements Disposable {
     @Data
     public static class MoveEvent {
         String eventName = "myMove";
-        public MoveEvent(){}
+
+        public MoveEvent() {
+        }
 
         public MoveEvent(PositionAndDirection positionAndDirection, int pid) {
             this.x = positionAndDirection.getX();
@@ -165,6 +157,7 @@ public class GoSender implements Disposable {
         public PositionAndDirection getPositionAndDirection() {
             return new PositionAndDirection(x, y, direction);
         }
+
         int pid;
     }
 
@@ -181,7 +174,7 @@ public class GoSender implements Disposable {
         public MovesEvent deserialize(JsonParser jsonParser, DeserializationContext ctxt) throws IOException, JsonProcessingException {
             if (jsonParser.getCurrentToken() == JsonToken.START_ARRAY) {
                 List<MoveEvent> permissions = new ArrayList<>();
-                while(jsonParser.nextToken() != JsonToken.END_ARRAY) {
+                while (jsonParser.nextToken() != JsonToken.END_ARRAY) {
                     permissions.add(jsonParser.readValueAs(MoveEvent.class));
                 }
                 MovesEvent movesEvent = new MovesEvent();
