@@ -10,6 +10,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.google.common.collect.ImmutableMap;
 
+import java.util.Arrays;
 import java.util.Collection;
 
 /**
@@ -40,11 +41,11 @@ public class GameScreen extends ScreenAdapter {
 
     public static enum Direction {LEFT, RIGHT, DOWN, UP}
 
-    ;
     private PositionAndDirection positionAndDirection;
+    private Direction provisionalDirection;
 
     private float accumulator;
-    private PositionAndDirection provisionalPositionAndDirection;
+
 
     final int WALL_DRAW_THICKNESS = 10;
     final Vector2[] wallVertices = new Vector2[]{
@@ -58,7 +59,7 @@ public class GameScreen extends ScreenAdapter {
     public GameScreen(TronP2PGame game, PositionAndDirection startingPosition, int pid) {
         this.game = game;
         this.positionAndDirection = startingPosition;
-        provisionalPositionAndDirection = new PositionAndDirection(this.positionAndDirection);
+        this.provisionalDirection = startingPosition.getDirection();
         this.pid = pid;
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
     }
@@ -70,16 +71,16 @@ public class GameScreen extends ScreenAdapter {
             public boolean keyDown(int keycode) {
                 switch (keycode) {
                     case Input.Keys.LEFT:
-                        provisionalPositionAndDirection.setDirection(Direction.LEFT);
+                        provisionalDirection = Direction.LEFT;
                         break;
                     case Input.Keys.RIGHT:
-                        provisionalPositionAndDirection.setDirection(Direction.RIGHT);
+                        provisionalDirection = Direction.RIGHT;
                         break;
                     case Input.Keys.UP:
-                        provisionalPositionAndDirection.setDirection(Direction.UP);
+                        provisionalDirection = Direction.UP;
                         break;
                     case Input.Keys.DOWN:
-                        provisionalPositionAndDirection.setDirection(Direction.DOWN);
+                        provisionalDirection = Direction.DOWN;
                         break;
                 }
                 return true;
@@ -92,17 +93,22 @@ public class GameScreen extends ScreenAdapter {
         final Collection<Object> goEvents = game.getGoSender().getGoEvents();
         for (Object event : goEvents) {
             if (event instanceof GoSender.RoundStartEvent) {
-                switch (provisionalPositionAndDirection.getDirection()) {
+                final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(positionAndDirection);
+                switch (provisionalDirection) {
                     case LEFT:
+                        provisionalPositionAndDirection.setDirection(Direction.LEFT);
                         provisionalPositionAndDirection.setX(Math.max(0, positionAndDirection.getX() - 1));
                         break;
                     case RIGHT:
+                        provisionalPositionAndDirection.setDirection(Direction.RIGHT);
                         provisionalPositionAndDirection.setX(Math.min(GRID_WIDTH - 1, positionAndDirection.getX() + 1));
                         break;
                     case DOWN:
+                        provisionalPositionAndDirection.setDirection(Direction.DOWN);
                         provisionalPositionAndDirection.setY(Math.max(0, positionAndDirection.getY() - 1));
                         break;
                     case UP:
+                        provisionalPositionAndDirection.setDirection(Direction.UP);
                         provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
                         break;
                 }
@@ -111,12 +117,10 @@ public class GameScreen extends ScreenAdapter {
                 // process moves
                 for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
                     PositionAndDirection move = moveEvent.getPositionAndDirection();
-                    grid[move.getX()][move.getX()] = moveEvent.getPid();
+                    grid[move.getX()][move.getY()] = moveEvent.getPid();
                     // if the move is me
                     if (moveEvent.getPid() == pid) {
-                        Gdx.app.log(TronP2PGame.LOG_TAG, "ACTUALLY MOVING");
-                        positionAndDirection = moveEvent.getPositionAndDirection();
-                        provisionalPositionAndDirection = new PositionAndDirection(positionAndDirection);
+                        positionAndDirection = move;
                     }
                 }
             } else {
@@ -145,6 +149,12 @@ public class GameScreen extends ScreenAdapter {
         shapeRenderer.setColor(Color.WHITE);
         shapeRenderer.rect(positionAndDirection.getX() * GRID_SIZE, positionAndDirection.getY() * GRID_SIZE, GRID_SIZE, GRID_SIZE);
         shapeRenderer.end();
+    }
+
+    private void printGrid() {
+        for (int[] row : grid) {
+            Gdx.app.log(TronP2PGame.LOG_TAG, Arrays.toString(row));
+        }
     }
 
     private void drawGrid(ShapeRenderer shapeRenderer) {

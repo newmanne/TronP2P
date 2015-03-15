@@ -152,6 +152,7 @@ func main() {
 			}
 
 			// read some reply from the java game (update of move, or death)
+			buf = make([]byte, 4096)
 			_, raddr, err := conn.ReadFromUDP(buf)
 			buf = bytes.Trim(buf, "\x00")
 			checkError(err)
@@ -171,7 +172,7 @@ func main() {
 				isNewRound = true
 			}
 
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 		}
 	}()
 	for {
