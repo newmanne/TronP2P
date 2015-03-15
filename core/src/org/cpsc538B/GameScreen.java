@@ -135,7 +135,9 @@ public class GameScreen extends ScreenAdapter {
         // figure out what the next move should be. This doesn't actually move you.
 
         // scroll
-        viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, getPositionAndDirection().getX() * GRID_SIZE)), getPositionAndDirection().getY() * GRID_SIZE, 0);
+        viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, getPositionAndDirection().getX() * GRID_SIZE)),
+                                          Math.min(GRID_HEIGHT * GRID_SIZE - V_HEIGHT / 2, Math.max(V_HEIGHT / 2, getPositionAndDirection().getY() * GRID_SIZE)),
+                                          0);
 
         // render
         viewport.apply();
