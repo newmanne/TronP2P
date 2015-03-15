@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-//	"net"
+	"net"
 	"os"
-//	"time"
+	"time"
+	"bytes"
 )
 
 
@@ -36,38 +37,60 @@ type MyMoveMessage struct {
 	MyMove					`json:"myMove"`
 }
 
+type MovesMessage struct {
+	EventName string        `json:"eventName"`
+	Moves []MyMove                `json:"moves"`
+}
 
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
-	message := RoundStartMessage{EventName:"roundStart", RoundStart{Round:gameState.Round}}
-	return json.Marshal(message)
+	message := RoundStartMessage{EventName:"roundStart", RoundStart: RoundStart{Round:gameState.Round, Pid: 1}}
+	val, e := json.Marshal(message)
+	checkError(e)
+	return val
 }
 
 
 func parseMessage(buf []byte) interface{} {
+	fmt.Println("Parsing the following message " + string(buf))
 	var dat map[string]interface{}
 	err := json.Unmarshal(buf, &dat)
 	checkError(err)
 
+	fmt.Println("dat: ", dat)
+
 	// TODO: error handling, default actions
 	eventName := dat["eventName"].(string)
-
+	var res interface{}
 	switch eventName {
 	case "myMove":
-		res := &MyMoveMessage{}
+		x, e := dat["x"].(float64)
+		fmt.Println(e)
+		y, e := dat["y"].(float64)
+		d, e := dat["direction"].(string)
+		p, e := dat["pid"].(float64)
+		res = MovesMessage{EventName:"moves", Moves: []MyMove{MyMove{X:int(x), Y:int(y), Direction:d, Pid:int(p)}}}
+
 	default:
-		res := &MyMoveMessage{}
+		x, e := dat["x"].(float64)
+		fmt.Println(e)
+		y, e := dat["y"].(float64)
+		d, e := dat["direction"].(string)
+		p, e := dat["pid"].(float64)
+		res = MyMoveMessage{EventName:"myMove", MyMove: MyMove{X:int(x), Y:int(y), Direction:d, Pid:int(p)}}
 	}
 
-	json.Unmarshal(buf, &res)
-
+	//json.Unmarshal(buf, &res)
+	fmt.Println("parsed message: ", res)
 	return res
 }
 
 
 func encodeMessage(message interface{}) []byte {
-	return json.Marshal(message)
+	val, e := json.Marshal(message)
+	checkError(e)
+	return val
 }
 
 func main() {
@@ -78,6 +101,7 @@ func main() {
 	}
 	javaPort := os.Args[1]
 	leaderAddr := os.Args[2]
+	fmt.Println("Leadder address is " + leaderAddr)
 
 	gameState.Round = 1
 
@@ -88,6 +112,7 @@ func main() {
 
 
 	raddr, err := net.ResolveUDPAddr("udp", "localhost:" + javaPort)
+	checkError(err)
 
 	// handle communication between other go clients
 	go func() {
@@ -95,9 +120,10 @@ func main() {
 		checkError(err)
 		conn, err := net.ListenUDP("udp", addr)
 		checkError(err)
-		buf := make([]byte, 1024)
+		buf := make([]byte, 4096)
 		for {
-			_, raddr, err := goConn.ReadFromUDP(buf)
+			_, raddr, err := conn.ReadFromUDP(buf)
+			fmt.Println(raddr)
 			checkError(err)
 
 
@@ -112,18 +138,22 @@ func main() {
 		checkError(err)
 		conn, err := net.ListenUDP("udp", addr)
 		checkError(err)
+		var isNewRound = true
+		var buf = make([]byte, 4096)
 		for {
 			if isNewRound {
 				// create message that new round is starting
-				byt := newRoundMessage(gameState)
+				byt := newRoundMessage()
 
 				// send message to everyone that new round has started
+				fmt.Println("Sending the following round start message " + string(byt))
 				conn.WriteToUDP(byt, raddr)
 				isNewRound = false
 			}
 
 			// read some reply from the java game (update of move, or death)
 			_, raddr, err := conn.ReadFromUDP(buf)
+			buf = bytes.Trim(buf, "\x00")
 			checkError(err)
 
 			// parse message, figure out if it is myMove message or something else 
@@ -132,7 +162,7 @@ func main() {
 			// TODO: only write back after receiving multiple replies, or after ticker timeout
 			if timeToReply {
 				// send out response of moves to take (and TODO: death updates if they exist)
-				byt, err := encodeMessage(message)
+				byt := encodeMessage(message)
 				checkError(err)
 
 				_, err = conn.WriteToUDP(byt, raddr)
@@ -141,10 +171,12 @@ func main() {
 				isNewRound = true
 			}
 
-			time.Sleep(1 * time.Second)
+			time.Sleep(200 * time.Millisecond)
 		}
 	}()
-
+	for {
+		time.Sleep(100)
+	}
 	
 	fmt.Println("GOODBYE")
 

@@ -25,8 +25,8 @@ public class GameScreen extends ScreenAdapter {
     public static final int V_HEIGHT = 1080;
 
     // grid dimensions
-    private final int GRID_WIDTH = 600;
-    private final int GRID_HEIGHT = 600;
+    private final int GRID_WIDTH = 200;
+    private final int GRID_HEIGHT = 200;
     private final int[][] grid = new int[GRID_WIDTH][GRID_HEIGHT];
 
     // display size of grid
@@ -70,16 +70,16 @@ public class GameScreen extends ScreenAdapter {
             public boolean keyDown(int keycode) {
                 switch (keycode) {
                     case Input.Keys.LEFT:
-                        positionAndDirection.setDirection(Direction.LEFT);
+                        provisionalPositionAndDirection.setDirection(Direction.LEFT);
                         break;
                     case Input.Keys.RIGHT:
-                        positionAndDirection.setDirection(Direction.RIGHT);
+                        provisionalPositionAndDirection.setDirection(Direction.RIGHT);
                         break;
                     case Input.Keys.UP:
-                        positionAndDirection.setDirection(Direction.UP);
+                        provisionalPositionAndDirection.setDirection(Direction.UP);
                         break;
                     case Input.Keys.DOWN:
-                        positionAndDirection.setDirection(Direction.DOWN);
+                        provisionalPositionAndDirection.setDirection(Direction.DOWN);
                         break;
                 }
                 return true;
@@ -92,42 +92,43 @@ public class GameScreen extends ScreenAdapter {
         final Collection<Object> goEvents = game.getGoSender().getGoEvents();
         for (Object event : goEvents) {
             if (event instanceof GoSender.RoundStartEvent) {
-                game.getGoSender().sendToGo(new GoSender.MoveEvent(positionAndDirection, pid));
+                switch (provisionalPositionAndDirection.getDirection()) {
+                    case LEFT:
+                        provisionalPositionAndDirection.setX(Math.max(0, positionAndDirection.getX() - 1));
+                        break;
+                    case RIGHT:
+                        provisionalPositionAndDirection.setX(Math.min(GRID_WIDTH - 1, positionAndDirection.getX() + 1));
+                        break;
+                    case DOWN:
+                        provisionalPositionAndDirection.setY(Math.max(0, positionAndDirection.getY() - 1));
+                        break;
+                    case UP:
+                        provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
+                        break;
+                }
+                game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves
-                for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoveEvents()) {
+                for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
                     PositionAndDirection move = moveEvent.getPositionAndDirection();
                     grid[move.getX()][move.getX()] = moveEvent.getPid();
                     // if the move is me
                     if (moveEvent.getPid() == pid) {
+                        Gdx.app.log(TronP2PGame.LOG_TAG, "ACTUALLY MOVING");
                         positionAndDirection = moveEvent.getPositionAndDirection();
+                        provisionalPositionAndDirection = new PositionAndDirection(positionAndDirection);
                     }
                 }
             } else {
                 throw new IllegalStateException();
             }
         }
-
         GameUtils.clearScreen();
 
         accumulator += delta;
 
         // game logic
         // figure out what the next move should be. This doesn't actually move you.
-        switch (positionAndDirection.getDirection()) {
-            case LEFT:
-                provisionalPositionAndDirection.setX(Math.max(0, positionAndDirection.getX() - 1));
-                break;
-            case RIGHT:
-                provisionalPositionAndDirection.setX(Math.min(GRID_WIDTH - 1, positionAndDirection.getX() + 1));
-                break;
-            case DOWN:
-                provisionalPositionAndDirection.setY(Math.max(0, positionAndDirection.getY() - 1));
-                break;
-            case UP:
-                provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
-                break;
-        }
 
         // scroll
         viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, positionAndDirection.getX() * GRID_SIZE)), positionAndDirection.getY() * GRID_SIZE, 0);

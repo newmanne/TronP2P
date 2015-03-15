@@ -50,7 +50,7 @@ public class StartScreen extends ScreenAdapter {
             @Override
             public void clicked(InputEvent event, float x, float y) {
                 StartScreen.this.game.getGoSender().init(textButton.getText().toString());
-                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(500, 500, GameScreen.Direction.DOWN), 1));
+                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(10, 10, GameScreen.Direction.DOWN), 1));
             }
         });
     }
