@@ -1,6 +1,5 @@
-package org.cpsc538B;
+package org.cpsc538B.screens;
 
-import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.ScreenAdapter;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -11,14 +10,10 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
-
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
+import org.cpsc538B.model.Direction;
+import org.cpsc538B.model.PositionAndDirection;
+import org.cpsc538B.TronP2PGame;
+import org.cpsc538B.utils.GameUtils;
 
 
 /**
@@ -48,14 +43,14 @@ public class StartScreen extends ScreenAdapter {
             public void clicked(InputEvent event, float x, float y) {
                 StartScreen.this.game.getGoSender().init(leaderIpField.getText(), true);
                 // TODO: can't really assign these positions just yet
-                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(10, 10, GameScreen.Direction.DOWN), 1));
+                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(10, 10, Direction.DOWN), 1));
             }
         });
         joinAGame.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
                 StartScreen.this.game.getGoSender().init(leaderIpField.getText(), false);
-                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(10, 10, GameScreen.Direction.DOWN), 1));
+                StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, new PositionAndDirection(10, 10, Direction.DOWN), 1));
             }
         });
 

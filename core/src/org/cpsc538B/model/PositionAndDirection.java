@@ -1,6 +1,5 @@
-package org.cpsc538B;
+package org.cpsc538B.model;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -8,13 +7,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class PositionAndDirection {
 
-    PositionAndDirection(PositionAndDirection other) {
+    public PositionAndDirection(PositionAndDirection other) {
         this.x = other.getX();
         this.y = other.getY();
         this.direction = other.getDirection();
     }
 
-    PositionAndDirection(int x, int y, GameScreen.Direction direction) {
+    public PositionAndDirection(int x, int y, Direction direction) {
         this.x = x;
         this.y = y;
         this.direction = direction;
@@ -22,5 +21,5 @@ public class PositionAndDirection {
 
     private int x;
     private int y;
-    private GameScreen.Direction direction;
+    private Direction direction;
 }

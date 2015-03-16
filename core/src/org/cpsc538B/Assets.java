@@ -8,6 +8,8 @@ import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
 import com.badlogic.gdx.scenes.scene2d.ui.Label.LabelStyle;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import lombok.Data;
+import org.cpsc538B.screens.GameScreen;
+import org.cpsc538B.utils.GameUtils;
 
 @Data
 public class Assets {

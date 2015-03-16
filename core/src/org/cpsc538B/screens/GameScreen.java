@@ -1,14 +1,18 @@
-package org.cpsc538B;
+package org.cpsc538B.screens;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.Input;
-import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.ScreenAdapter;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.google.common.collect.ImmutableMap;
+import org.cpsc538B.*;
+import org.cpsc538B.go.GoSender;
+import org.cpsc538B.input.TronInput;
+import org.cpsc538B.model.Direction;
+import org.cpsc538B.model.PositionAndDirection;
+import org.cpsc538B.utils.GameUtils;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -20,37 +24,44 @@ import java.util.Map;
  */
 public class GameScreen extends ScreenAdapter {
 
-    private static final int UNOCCUPIED = 0;
-    private final TronP2PGame game;
-
     // resolution
     public static final int V_WIDTH = 1920;
     public static final int V_HEIGHT = 1080;
 
+    public static final int UNOCCUPIED = 0;
+
     // grid dimensions
-    private final int GRID_WIDTH = 200;
-    private final int GRID_HEIGHT = 200;
-    private final int[][] grid = new int[GRID_WIDTH][GRID_HEIGHT];
+    public final int GRID_WIDTH = 200;
+    public final int GRID_HEIGHT = 200;
 
-    // display size of grid
-    private final static int GRID_SIZE = 10;
+    // display size of grid (how big each square is)
+    public final static int GRID_SIZE = 10;
 
-    private final ImmutableMap<Integer, Color> pidToColor = ImmutableMap.of(1, Color.RED, 2, Color.BLUE);
+    // player colors
+    private final ImmutableMap<Integer, Color> pidToColor = ImmutableMap.<Integer, Color>builder()
+            .put(1, Color.RED)
+            .put(2, Color.BLUE)
+            .put(3, Color.GREEN)
+            .put(4, Color.PURPLE)
+            .put(5, Color.GRAY)
+            .put(6, Color.ORANGE)
+            .put(7, Color.OLIVE)
+            .put(8, Color.MAGENTA)
+            .build();
 
-    private final int pid;
-
+    // libgdx stuff
+    private final TronP2PGame game;
     private final StretchViewport viewport;
+    private TronInput tronInput;
 
-    public static enum Direction {LEFT, RIGHT, DOWN, UP}
-
+    // game state
     private final Map<Integer, PositionAndDirection> playerPositions;
-    private Direction provisionalDirection;
+    private final int[][] grid = new int[GRID_WIDTH][GRID_HEIGHT];
+    private final int pid;
 
     private float accumulator;
 
-
-    final int WALL_DRAW_THICKNESS = 10;
-    final Vector2[] wallVertices = new Vector2[]{
+    private final Vector2[] wallVertices = new Vector2[]{
             new Vector2(0, 0),
             new Vector2(GRID_HEIGHT * GRID_SIZE, 0),
             new Vector2(GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE),
@@ -62,33 +73,14 @@ public class GameScreen extends ScreenAdapter {
         this.game = game;
         playerPositions = new HashMap<>();
         playerPositions.put(pid, startingPosition);
-        this.provisionalDirection = startingPosition.getDirection();
+        tronInput = new TronInput(startingPosition.getDirection());
         this.pid = pid;
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
     }
 
     @Override
     public void show() {
-        Gdx.input.setInputProcessor(new InputAdapter() {
-            @Override
-            public boolean keyDown(int keycode) {
-                switch (keycode) {
-                    case Input.Keys.LEFT:
-                        provisionalDirection = Direction.LEFT;
-                        break;
-                    case Input.Keys.RIGHT:
-                        provisionalDirection = Direction.RIGHT;
-                        break;
-                    case Input.Keys.UP:
-                        provisionalDirection = Direction.UP;
-                        break;
-                    case Input.Keys.DOWN:
-                        provisionalDirection = Direction.DOWN;
-                        break;
-                }
-                return true;
-            }
-        });
+        Gdx.input.setInputProcessor(tronInput);
     }
 
     @Override
@@ -97,7 +89,7 @@ public class GameScreen extends ScreenAdapter {
         for (Object event : goEvents) {
             if (event instanceof GoSender.RoundStartEvent) {
                 final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(getPositionAndDirection());
-                switch (provisionalDirection) {
+                switch (tronInput.getProvisionalDirection()) {
                     case LEFT:
                         provisionalPositionAndDirection.setDirection(Direction.LEFT);
                         provisionalPositionAndDirection.setX(Math.max(0, getPositionAndDirection().getX() - 1));
@@ -131,9 +123,6 @@ public class GameScreen extends ScreenAdapter {
 
         accumulator += delta;
 
-        // game logic
-        // figure out what the next move should be. This doesn't actually move you.
-
         // scroll
         viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, getPositionAndDirection().getX() * GRID_SIZE)),
                                           Math.min(GRID_HEIGHT * GRID_SIZE - V_HEIGHT / 2, Math.max(V_HEIGHT / 2, getPositionAndDirection().getY() * GRID_SIZE)),
@@ -164,6 +153,7 @@ public class GameScreen extends ScreenAdapter {
         return playerPositions.get(pid);
     }
 
+    // debug
     private void printGrid() {
         for (int[] row : grid) {
             Gdx.app.log(TronP2PGame.LOG_TAG, Arrays.toString(row));
@@ -173,10 +163,9 @@ public class GameScreen extends ScreenAdapter {
     private void drawGrid(ShapeRenderer shapeRenderer) {
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         for (int i = 0; i < grid.length; i++) {
-            int[] row = grid[i];
-            for (int j = 0; j < row.length; j++) {
-                int square = row[j];
-                if (square != 0) {
+            for (int j = 0; j < grid[i].length; j++) {
+                int square = grid[i][j];
+                if (square != UNOCCUPIED) {
                     shapeRenderer.setColor(pidToColor.get(square));
                     shapeRenderer.rect(i * GRID_SIZE, j * GRID_SIZE, GRID_SIZE, GRID_SIZE);
                 }
@@ -187,11 +176,9 @@ public class GameScreen extends ScreenAdapter {
 
     private void drawWalls(ShapeRenderer shapeRenderer) {
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        shapeRenderer.setColor(Color.WHITE);
+        shapeRenderer.setColor(Color.PINK);
         for (int i = 0; i < wallVertices.length - 1; i++) {
-            // add a little bit extra to make sure the walls get fully drawn
-            final Vector2 addition = wallVertices[i + 1].cpy().sub(wallVertices[i]).nor().scl(WALL_DRAW_THICKNESS / 2);
-            shapeRenderer.rectLine(wallVertices[i], wallVertices[i + 1].cpy().add(addition), WALL_DRAW_THICKNESS);
+            shapeRenderer.rectLine(wallVertices[i], wallVertices[i + 1], GRID_SIZE * 2);
         }
         shapeRenderer.end();
     }

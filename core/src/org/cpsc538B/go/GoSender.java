@@ -1,9 +1,8 @@
-package org.cpsc538B;
+package org.cpsc538B.go;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Disposable;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonRawValue;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.JsonToken;
@@ -13,8 +12,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableMap;
-import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.cpsc538B.model.Direction;
+import org.cpsc538B.model.PositionAndDirection;
+import org.cpsc538B.TronP2PGame;
+import org.cpsc538B.utils.JSONUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -25,8 +28,6 @@ import java.net.InetAddress;
 import java.net.SocketException;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.SynchronousQueue;
 
 /**
  * Created by newmanne on 14/03/15.
@@ -38,8 +39,9 @@ public class GoSender implements Disposable {
     private InetAddress goAddress;
     private DatagramSocket serverSocket;
     private int goPort;
+    final ImmutableMap<String, Class<?>> nameToEvent = ImmutableMap.of("roundStart", RoundStartEvent.class, "myMove", MoveEvent.class, "moves", MovesEvent.class);
 
-    void init(final String masterAddress, final boolean leader) {
+    public void init(final String masterAddress, final boolean leader) {
         // spawn server
         try {
             serverSocket = new DatagramSocket(0);
@@ -126,21 +128,17 @@ public class GoSender implements Disposable {
         goProcess.destroyForcibly();
     }
 
-    final ImmutableBiMap<String, Class<?>> nameToEvent = ImmutableBiMap.of("roundStart", RoundStartEvent.class, "myMove", MoveEvent.class, "moves", MovesEvent.class);
 
     @Data
     public static class RoundStartEvent {
         String eventName = "roundStart";
-        int round;
         int pid;
     }
 
     @Data
+    @NoArgsConstructor
     public static class MoveEvent {
         String eventName = "myMove";
-
-        public MoveEvent() {
-        }
 
         public MoveEvent(PositionAndDirection positionAndDirection, int pid) {
             this.x = positionAndDirection.getX();
@@ -151,7 +149,7 @@ public class GoSender implements Disposable {
 
         int x;
         int y;
-        GameScreen.Direction direction;
+        Direction direction;
 
         @JsonIgnore
         public PositionAndDirection getPositionAndDirection() {

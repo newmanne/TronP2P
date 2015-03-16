@@ -1,4 +1,4 @@
-package org.cpsc538B;
+package org.cpsc538B.utils;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;

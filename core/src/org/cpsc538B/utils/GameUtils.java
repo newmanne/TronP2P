@@ -1,17 +1,18 @@
-package org.cpsc538B;
+package org.cpsc538B.utils;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.*;
+import org.cpsc538B.TronP2PGame;
 
 public class GameUtils {
+
     public static void clearScreen() {
         // clear screen
         Gdx.gl.glClearColor(0, 0, 0, 1);
@@ -80,17 +81,6 @@ public class GameUtils {
                 resizeActorsFont(groupActor);
             }
         }
-    }
-
-    public static boolean isOutOfBounds(Vector2 position) {
-        return position.x > GameScreen.V_WIDTH ||
-                position.x < 0 ||
-                position.y > GameScreen.V_HEIGHT ||
-                position.y < 0;
-    }
-
-    public static Vector2 getCenter() {
-        return new Vector2(GameScreen.V_WIDTH / 2, GameScreen.V_HEIGHT / 2);
     }
 
 }
