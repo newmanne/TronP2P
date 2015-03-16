@@ -1,1 +1,1 @@
-ps aux | grep go-build | grep -v grep | cut -d ' ' -f 3 | xargs -i kill {}
+ps aux | grep go-build | grep -v grep | awk '{print $2}' | xargs kill
