@@ -21,6 +21,7 @@ import org.cpsc538B.utils.GameUtils;
  */
 public class StartScreen extends ScreenAdapter {
 
+    public static final String DEFAULT_IP = "localhost:8081";
     private final Stage stage;
     private final Table rootTable;
     private final TronP2PGame game;
@@ -34,7 +35,7 @@ public class StartScreen extends ScreenAdapter {
 
         // stuff
         Label logo = new Label("TRON", game.getAssets().getLargeLabelStyle());
-        final TextField leaderIpField = new TextField("IP", game.getAssets().getSkin());
+        final TextField leaderIpField = new TextField(DEFAULT_IP, game.getAssets().getSkin());
         final TextButton startAGame = new TextButton("START A GAME", game.getAssets().getSkin());
         final TextButton joinAGame = new TextButton("JOIN A GAME", game.getAssets().getSkin());
 

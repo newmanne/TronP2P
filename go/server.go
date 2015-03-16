@@ -1,60 +1,60 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
-	"bytes"
 )
 
 type GameState struct {
 	Round int
 }
+
 var gameState GameState
 
 type MyMove struct {
-	X int					`json:"x"`
-	Y int					`json:"y"`
-	Direction string		`json:"direction"`
-	Pid int					`json:"pid"`
+	X         int    `json:"x"`
+	Y         int    `json:"y"`
+	Direction string `json:"direction"`
+	Pid       int    `json:"pid"`
 }
 
 type RoundStart struct {
-	Round int				`json:"round"`
-	Pid int					`json:"pid"`
+	Round int `json:"round"`
+	Pid   int `json:"pid"`
 }
 
 type RoundStartMessage struct {
-	EventName string		`json:"eventName"`
-	Round int				'json:"round"'
-	RoundStart				`json:"roundStart"`
+	EventName  string `json:"eventName"`
+	Round      int    `json:"round"`
+	RoundStart `json:"roundStart"`
 }
 
 type MyMoveMessage struct {
-	EventName string		`json:"eventName"`
-	Round int				'json:"round"'
-	MyMove					`json:"myMove"`
+	EventName string `json:"eventName"`
+	Round     int    `json:"round"`
+	MyMove    `json:"myMove"`
 }
 
 type MovesMessage struct {
-	EventName string		`json:"eventName"`
-	Round int				'json:"round"'
-	Moves []MyMove			`json:"moves"`
+	EventName string   `json:"eventName"`
+	Round     int      `json:"round"`
+	Moves     []MyMove `json:"moves"`
 }
-
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
-	message := RoundStartMessage{EventName:"roundStart", Round:gameState.Round, RoundStart: RoundStart{Round:gameState.Round, Pid: 1}}
+	message := RoundStartMessage{EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round, Pid: 1}}
 	val, e := json.Marshal(message)
 	checkError(e)
 	return val
 }
 
-
-func parseMessage(buf []byte) interface{} {
+func parseMessage(buf []byte) MovesMessage {
 	fmt.Println("Parsing the following message " + string(buf))
 	var dat map[string]interface{}
 	err := json.Unmarshal(buf, &dat)
@@ -64,7 +64,7 @@ func parseMessage(buf []byte) interface{} {
 
 	// TODO: error handling, default actions
 	eventName := dat["eventName"].(string)
-	var res interface{}
+	var res MovesMessage
 	switch eventName {
 	case "myMove":
 		x, e := dat["x"].(float64)
@@ -72,7 +72,7 @@ func parseMessage(buf []byte) interface{} {
 		y, e := dat["y"].(float64)
 		d, e := dat["direction"].(string)
 		p, e := dat["pid"].(float64)
-		res = MovesMessage{EventName:"moves", Round:gameState.Round, Moves: []MyMove{MyMove{X:int(x), Y:int(y), Direction:d, Pid:int(p)}}}
+		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: int(p)}}}
 
 	default:
 		x, e := dat["x"].(float64)
@@ -80,14 +80,12 @@ func parseMessage(buf []byte) interface{} {
 		y, e := dat["y"].(float64)
 		d, e := dat["direction"].(string)
 		p, e := dat["pid"].(float64)
-		res = MovesMessage{EventName:"moves", Round:gameState.Round, Moves: []MyMove{MyMove{X:int(x), Y:int(y), Direction:d, Pid:int(p)}}}
+		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: int(p)}}}
 	}
 
-	//json.Unmarshal(buf, &res)
 	fmt.Println("parsed message: ", res)
 	return res
 }
-
 
 func encodeMessage(message interface{}) []byte {
 	val, e := json.Marshal(message)
@@ -95,29 +93,33 @@ func encodeMessage(message interface{}) []byte {
 	return val
 }
 
-
-// 
+//
 func leaderListener(leaderAddr string) {
 
-	playerCount := 2	// somehow know how many people I am waiting for
+	playerCount := 1           // somehow know how many people I am waiting for
 	var responses map[int]bool // map pid -> response received
 
 	addr, err := net.ResolveUDPAddr("udp", leaderAddr)
 	checkError(err)
-	conn, err := net.ListenUDP("udp", "localhost:" + addr.Port)
+	addr2, err := net.ResolveUDPAddr("udp", "localhost:"+strconv.Itoa(addr.Port))
 	checkError(err)
+	conn, err := net.ListenUDP("udp", addr2)
+	checkError(err)
+	fmt.Println("Leader has started")
 
 	var reply MovesMessage
-	raddrs := make([]string, 2)
+	raddrs := make([]*net.UDPAddr, 0)
 
 	// LOBBY PHASE
 	// before the general main loop, wait for playerCount messages,
 	// this will tell me who I need to send roundStarts to.
 	for {
 		var buf = make([]byte, 4096)
+		fmt.Println("Waiting for a hello message")
 		_, raddr, err := conn.ReadFromUDP(buf)
 		buf = bytes.Trim(buf, "\x00")
 		checkError(err)
+		fmt.Println("Leader has received a hello message")
 
 		in := false
 		for _, item := range raddrs {
@@ -129,19 +131,21 @@ func leaderListener(leaderAddr string) {
 			raddrs = append(raddrs, raddr)
 		}
 		if len(raddrs) == playerCount {
-			break // we can start, and send out a new round message
+			byt := newRoundMessage()
+
+			// send message to all followers
+			for i := range raddrs {
+				_, err = conn.WriteToUDP(byt, raddrs[i])
+				checkError(err)
+			}
+			// start a new round of communication
+			break
 		}
 	}
 
 	// MAIN LOOP SECTION
 	isNewRound := true
 	for {
-		// read a message from some follower
-		var buf = make([]byte, 4096)
-		_, raddr, err := conn.ReadFromUDP(buf)
-		buf = bytes.Trim(buf, "\x00")
-		checkError(err)
-
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
 			// create message that new round is starting
@@ -152,22 +156,28 @@ func leaderListener(leaderAddr string) {
 
 			for i := range raddrs {
 				_, err := conn.WriteToUDP(byt, raddrs[i])
-				checkError(err)		
+				checkError(err)
 			}
 
 			isNewRound = false
 			responses = make(map[int]bool)
-			raddrs = make([]string, 2)
+			raddrs = make([]*net.UDPAddr, 0)
 
-			reply = MovesMessage{EventName:"moves", Round:gameState.Round, Moves: make([]MyMove)}
+			reply = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: make([]MyMove, 1)}
 		}
+
+		// read a message from some follower
+		var buf = make([]byte, 4096)
+		_, raddr, err := conn.ReadFromUDP(buf)
+		buf = bytes.Trim(buf, "\x00")
+		checkError(err)
 
 		// parse the new message into a MovesMessage struct (usually)
 		commands := parseMessage(buf)
 
 		// append moves received to list of all moves recieved for current round
 		if commands.EventName == "moves" && commands.Round == gameState.Round {
-			for index, move := range commands.Moves {
+			for _, move := range commands.Moves {
 				reply.Moves = append(reply.Moves, move)
 				responses[move.Pid] = true
 			}
@@ -191,26 +201,29 @@ func leaderListener(leaderAddr string) {
 }
 
 func main() {
-	fmt.Println("HELLO I AM STARTED");
+	fmt.Println("HELLO I AM STARTED")
 
-	if (len(os.Args) != 4) {
+	if len(os.Args) != 4 {
 		fmt.Println("RTFM")
+		panic("DYING")
 	}
 	javaPort := os.Args[1]
 	leaderAddr := os.Args[2]
-	isLeader := os.Args[3]
+	isLeader, err := strconv.ParseBool(os.Args[3])
+
+	checkError(err)
 
 	fmt.Println("Leadder address is " + leaderAddr)
 	gameState.Round = 1
 
 	timeToReply := true // TODO: set by ticker or all clients replied
 
-	sendChan := make(chan string, 1)
-	recvChan := make(chan string, 1)
+	sendChan := make(chan []byte, 1)
+	recvChan := make(chan []byte, 1)
 
 	fmt.Println("Trying to connect to java on localhost:" + javaPort)
 
-	raddr, err := net.ResolveUDPAddr("udp", "localhost:" + javaPort)
+	raddr, err := net.ResolveUDPAddr("udp", "localhost:"+javaPort)
 	checkError(err)
 
 	// if I am the leader, listen for rounds to confirm them
@@ -226,23 +239,28 @@ func main() {
 		checkError(err)
 
 		// write message to leader to let them know I exist (LOBBY PHASE)
-		_, err = conn.WriteToUDP([]byte("hello leader"), leaderAddr)
+		leaderAddrAsAddr, err := net.ResolveUDPAddr("udp", leaderAddr)
+		checkError(err)
+
+		fmt.Println("Sending a hello message to the leader")
+		_, err = conn.WriteToUDP([]byte("hello leader"), leaderAddrAsAddr)
 		checkError(err)
 
 		// read response from leader
 		response := make([]byte, 4096)
-		_, _, err := conn.ReadFromUDP(response)
+		_, _, err = conn.ReadFromUDP(response)
 		checkError(err)
+		fmt.Println("Received a response from the leader")
 
 		// write back to channel with byte response (let java know to start)
 		recvChan <- response
 
 		for {
 			// wait for message on leader channel
-			message := <- sendChan // TODO make this
+			message := <-sendChan // TODO make this
 
 			// write message to leader address
-			_, err = conn.WriteToUDP(message, leaderAddr)
+			_, err = conn.WriteToUDP(message, leaderAddrAsAddr)
 			checkError(err)
 
 			// read response from leader
@@ -265,7 +283,7 @@ func main() {
 		// LOBBY PHASE; need to recv response from leader,
 		// pass message onto java side (first round start)
 
-		reply := <- recvChan
+		reply := <-recvChan
 		_, err = conn.WriteToUDP(reply, raddr)
 		checkError(err)
 
@@ -280,7 +298,7 @@ func main() {
 			sendChan <- buf
 
 			// read reply (timeToReply?) from leader (TODO: use a select w/ timeout?)
-			reply := <- recvChan
+			reply := <-recvChan
 
 			// TODO: only write back after receiving multiple replies, or after ticker timeout
 			if timeToReply {
@@ -296,7 +314,7 @@ func main() {
 	for {
 		time.Sleep(100)
 	}
-	
+
 	fmt.Println("GOODBYE")
 
 }

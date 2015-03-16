@@ -56,7 +56,9 @@ public class GoSender implements Disposable {
         new Thread(() -> {
             try {
                 Runtime r = Runtime.getRuntime();
-                goProcess = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader)).start();
+                final ProcessBuilder processBuilder = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader));
+                Gdx.app.log(TronP2PGame.LOG_TAG, "Running the following command:" + System.lineSeparator() + processBuilder.command() + System.lineSeparator());
+                goProcess = processBuilder.start();
 
                 BufferedReader stdInput = new BufferedReader(new InputStreamReader(goProcess.getInputStream()));
                 BufferedReader stdError = new BufferedReader(new InputStreamReader(goProcess.getErrorStream()));
@@ -87,7 +89,7 @@ public class GoSender implements Disposable {
                     e.printStackTrace();
                 }
                 String sentence = new String(receivePacket.getData()).trim();
-                System.out.println("RECEIVED: " + sentence);
+                Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + sentence);
                 try {
                     goPort = receivePacket.getPort();
                     goAddress = receivePacket.getAddress();
@@ -133,6 +135,7 @@ public class GoSender implements Disposable {
     public static class RoundStartEvent {
         String eventName = "roundStart";
         int pid;
+        int round;
     }
 
     @Data
