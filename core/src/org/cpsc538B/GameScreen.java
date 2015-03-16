@@ -12,6 +12,8 @@ import com.google.common.collect.ImmutableMap;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Created by newmanne on 12/03/15.
@@ -41,7 +43,7 @@ public class GameScreen extends ScreenAdapter {
 
     public static enum Direction {LEFT, RIGHT, DOWN, UP}
 
-    private PositionAndDirection positionAndDirection;
+    private final Map<Integer, PositionAndDirection> playerPositions;
     private Direction provisionalDirection;
 
     private float accumulator;
@@ -58,7 +60,8 @@ public class GameScreen extends ScreenAdapter {
 
     public GameScreen(TronP2PGame game, PositionAndDirection startingPosition, int pid) {
         this.game = game;
-        this.positionAndDirection = startingPosition;
+        playerPositions = new HashMap<>();
+        playerPositions.put(pid, startingPosition);
         this.provisionalDirection = startingPosition.getDirection();
         this.pid = pid;
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
@@ -93,23 +96,23 @@ public class GameScreen extends ScreenAdapter {
         final Collection<Object> goEvents = game.getGoSender().getGoEvents();
         for (Object event : goEvents) {
             if (event instanceof GoSender.RoundStartEvent) {
-                final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(positionAndDirection);
+                final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(getPositionAndDirection());
                 switch (provisionalDirection) {
                     case LEFT:
                         provisionalPositionAndDirection.setDirection(Direction.LEFT);
-                        provisionalPositionAndDirection.setX(Math.max(0, positionAndDirection.getX() - 1));
+                        provisionalPositionAndDirection.setX(Math.max(0, getPositionAndDirection().getX() - 1));
                         break;
                     case RIGHT:
                         provisionalPositionAndDirection.setDirection(Direction.RIGHT);
-                        provisionalPositionAndDirection.setX(Math.min(GRID_WIDTH - 1, positionAndDirection.getX() + 1));
+                        provisionalPositionAndDirection.setX(Math.min(GRID_WIDTH - 1, getPositionAndDirection().getX() + 1));
                         break;
                     case DOWN:
                         provisionalPositionAndDirection.setDirection(Direction.DOWN);
-                        provisionalPositionAndDirection.setY(Math.max(0, positionAndDirection.getY() - 1));
+                        provisionalPositionAndDirection.setY(Math.max(0, getPositionAndDirection().getY() - 1));
                         break;
                     case UP:
                         provisionalPositionAndDirection.setDirection(Direction.UP);
-                        provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, positionAndDirection.getY() + 1));
+                        provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, getPositionAndDirection().getY() + 1));
                         break;
                 }
                 game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
@@ -118,10 +121,7 @@ public class GameScreen extends ScreenAdapter {
                 for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
                     PositionAndDirection move = moveEvent.getPositionAndDirection();
                     grid[move.getX()][move.getY()] = moveEvent.getPid();
-                    // if the move is me
-                    if (moveEvent.getPid() == pid) {
-                        positionAndDirection = move;
-                    }
+                    playerPositions.put(pid, move);
                 }
             } else {
                 throw new IllegalStateException();
@@ -135,7 +135,9 @@ public class GameScreen extends ScreenAdapter {
         // figure out what the next move should be. This doesn't actually move you.
 
         // scroll
-        viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, positionAndDirection.getX() * GRID_SIZE)), positionAndDirection.getY() * GRID_SIZE, 0);
+        viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, getPositionAndDirection().getX() * GRID_SIZE)),
+                                          Math.min(GRID_HEIGHT * GRID_SIZE - V_HEIGHT / 2, Math.max(V_HEIGHT / 2, getPositionAndDirection().getY() * GRID_SIZE)),
+                                          0);
 
         // render
         viewport.apply();
@@ -144,11 +146,22 @@ public class GameScreen extends ScreenAdapter {
 
         drawWalls(shapeRenderer);
         drawGrid(shapeRenderer);
-        // draw player
+        drawPlayers(shapeRenderer);
+
+    }
+
+    private void drawPlayers(ShapeRenderer shapeRenderer) {
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         shapeRenderer.setColor(Color.WHITE);
-        shapeRenderer.rect(positionAndDirection.getX() * GRID_SIZE, positionAndDirection.getY() * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+        playerPositions.entrySet().stream().forEach(entry -> {
+            final PositionAndDirection positionAndDirection = entry.getValue();
+            shapeRenderer.rect(positionAndDirection.getX() * GRID_SIZE, positionAndDirection.getY() * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+        });
         shapeRenderer.end();
+    }
+
+    private PositionAndDirection getPositionAndDirection() {
+        return playerPositions.get(pid);
     }
 
     private void printGrid() {
