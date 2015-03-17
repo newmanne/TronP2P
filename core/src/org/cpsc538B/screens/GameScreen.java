@@ -86,8 +86,9 @@ public class GameScreen extends ScreenAdapter {
     @Override
     public void render(float delta) {
         final Collection<Object> goEvents = game.getGoSender().getGoEvents();
-        for (Object event : goEvents) {
-            if (event instanceof GoSender.RoundStartEvent) {
+
+        for (Object event : goEvents) {	
+		if (event instanceof GoSender.RoundStartEvent) {
                 final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(getPositionAndDirection());
                 switch (tronInput.getProvisionalDirection()) {
                     case LEFT:
@@ -113,8 +114,11 @@ public class GameScreen extends ScreenAdapter {
                 for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
                     PositionAndDirection move = moveEvent.getPositionAndDirection();
                     grid[move.getX()][move.getY()] = moveEvent.getPid();
+		    Gdx.app.log(TronP2PGame.GO_STDOUT_TAG, "MOVE " + move.getX() + " " + move.getY());
                     playerPositions.put(pid, move);
                 }
+		//game.getGoSender().sendToGo(new GoSender.MoveEvent(new PositionAndDirection(getPositionAndDirection()), pid));
+		game.getGoSender().sendToGo(new GoSender.NullEvent(pid));
             } else {
                 throw new IllegalStateException();
             }

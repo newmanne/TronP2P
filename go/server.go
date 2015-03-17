@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"sync"
 )
 
 type GameState struct {
@@ -45,6 +46,7 @@ type MovesMessage struct {
 	Round     int      `json:"round"`
 	Moves     []MyMove `json:"moves"`
 }
+	
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
@@ -75,12 +77,13 @@ func parseMessage(buf []byte) MovesMessage {
 		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: int(p)}}}
 
 	default:
-		x, e := dat["x"].(float64)
+		fmt.Println("ERROR! This should not happen.");
+		/*x, e := dat["x"].(float64)
 		fmt.Println(e)
 		y, e := dat["y"].(float64)
 		d, e := dat["direction"].(string)
 		p, e := dat["pid"].(float64)
-		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: int(p)}}}
+		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: int(p)}}}*/
 	}
 
 	fmt.Println("parsed message: ", res)
@@ -163,19 +166,21 @@ func leaderListener(leaderAddr string) {
 			responses = make(map[int]bool)
 			raddrs = make([]*net.UDPAddr, 0)
 
-			reply = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: make([]MyMove, 1)}
+			reply = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: make([]MyMove, 0)}
 		}
 
 		// read a message from some follower
 		var buf = make([]byte, 4096)
 		_, raddr, err := conn.ReadFromUDP(buf)
 		buf = bytes.Trim(buf, "\x00")
+		fmt.Println("DEBUG SERVER?", string(buf), conn.LocalAddr());
 		checkError(err)
 
 		// parse the new message into a MovesMessage struct (usually)
 		commands := parseMessage(buf)
 
 		// append moves received to list of all moves recieved for current round
+		fmt.Println("DEBUG BUG?", string(encodeMessage(reply)));
 		if commands.EventName == "moves" && commands.Round == gameState.Round {
 			for _, move := range commands.Moves {
 				reply.Moves = append(reply.Moves, move)
@@ -184,6 +189,7 @@ func leaderListener(leaderAddr string) {
 			// keep track of who to respond to
 			raddrs = append(raddrs, raddr)
 		}
+		fmt.Println("DEBUG BUG?", string(encodeMessage(reply)));
 
 		// end condition; reply to my followers if I have been messaged by all of them
 		if len(responses) == playerCount {
@@ -197,6 +203,99 @@ func leaderListener(leaderAddr string) {
 			// start a new round of communication
 			isNewRound = true
 		}
+	}
+}
+
+func functionOne(sendChan, recvChan chan []byte, leaderAddr string, wg sync.WaitGroup) {
+	defer wg.Done()
+	addr, err := net.ResolveUDPAddr("udp", ":0")
+	
+	checkError(err)
+	conn, err := net.ListenUDP("udp", addr)
+	fmt.Println(conn.LocalAddr());
+	checkError(err)
+
+	// write message to leader to let them know I exist (LOBBY PHASE)
+	leaderAddrAsAddr, err := net.ResolveUDPAddr("udp", leaderAddr)
+	checkError(err)
+
+	fmt.Println("Sending a hello message to the leader")
+	_, err = conn.WriteToUDP([]byte("hello leader"), leaderAddrAsAddr)
+	checkError(err)
+
+	// read response from leader
+	response := make([]byte, 4096)
+	_, _, err = conn.ReadFromUDP(response)
+	checkError(err)
+	fmt.Println("Received a response from the leader:" + string(response))
+
+	// write back to channel with byte response (let java know to start)
+	recvChan <- response
+
+	for {
+		// wait for message on leader channel
+		message := <-sendChan // TODO make this
+
+		// write message to leader address
+		//SECOND//
+		fmt.Println("DEBUG SENDING MESSAGE?", string(message))
+		_, err = conn.WriteToUDP(message, leaderAddrAsAddr)
+		checkError(err)
+
+		// read response from leader
+		response = make([]byte, 4096)
+		_, _, err := conn.ReadFromUDP(response)
+		checkError(err)
+		response = bytes.Trim(response, "\x00")
+		//THIRD//
+		fmt.Println("DEBUG RECEIVE RESPONSE?", string(response), " from ", conn.LocalAddr())
+		
+		// write back to channel with byte response
+		recvChan <- response
+	}
+}
+
+
+func functionTwo(sendChan, recvChan chan []byte, raddr *net.UDPAddr, timeToReply bool, wg sync.WaitGroup) {
+	defer wg.Done()
+	addr, err := net.ResolveUDPAddr("udp", ":0")
+	checkError(err)
+	
+	conn, err := net.ListenUDP("udp", addr)
+	fmt.Println(conn.LocalAddr());
+	checkError(err)
+
+	// LOBBY PHASE; need to recv response from leader,
+	// pass message onto java side (first round start)
+
+	reply := <-recvChan
+	_, err = conn.WriteToUDP(reply, raddr)
+	checkError(err)
+
+	for {
+		// read some reply from the java game (update of move, or death)
+		var buf = make([]byte, 4096)
+		_, raddr, err := conn.ReadFromUDP(buf)
+		buf = bytes.Trim(buf, "\x00")
+		//FIRST//
+		fmt.Println("DEBUG RECEIVE", string(buf))
+		checkError(err)
+
+		// send buf to leader channel
+		sendChan <- buf
+
+		// read reply (timeToReply?) from leader (TODO: use a select w/ timeout?)
+		reply := <-recvChan
+
+		// TODO: only write back after receiving multiple replies, or after ticker timeout
+		//FOURTH//
+		fmt.Println("DEBUG SENDING", string(reply))
+		if timeToReply {
+			_, err = conn.WriteToUDP(reply, raddr)
+			checkError(err)
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -218,8 +317,7 @@ func main() {
 
 	timeToReply := true // TODO: set by ticker or all clients replied
 
-	sendChan := make(chan []byte, 1)
-	recvChan := make(chan []byte, 1)
+	sendChan, recvChan := make(chan []byte, 1), make(chan []byte, 1)
 
 	fmt.Println("Trying to connect to java on localhost:" + javaPort)
 
@@ -231,89 +329,16 @@ func main() {
 		go leaderListener(leaderAddr)
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+	
 	// handle communication through leader channel (follower code to leader)
-	go func(sendChan <-chan []byte, recvChan chan<- []byte) {
-		addr, err := net.ResolveUDPAddr("udp", ":0")
-		checkError(err)
-		conn, err := net.ListenUDP("udp", addr)
-		checkError(err)
-
-		// write message to leader to let them know I exist (LOBBY PHASE)
-		leaderAddrAsAddr, err := net.ResolveUDPAddr("udp", leaderAddr)
-		checkError(err)
-
-		fmt.Println("Sending a hello message to the leader")
-		_, err = conn.WriteToUDP([]byte("hello leader"), leaderAddrAsAddr)
-		checkError(err)
-
-		// read response from leader
-		response := make([]byte, 4096)
-		_, _, err = conn.ReadFromUDP(response)
-		checkError(err)
-		fmt.Println("Received a response from the leader")
-
-		// write back to channel with byte response (let java know to start)
-		recvChan <- response
-
-		for {
-			// wait for message on leader channel
-			message := <-sendChan // TODO make this
-
-			// write message to leader address
-			_, err = conn.WriteToUDP(message, leaderAddrAsAddr)
-			checkError(err)
-
-			// read response from leader
-			response = make([]byte, 4096)
-			_, _, err := conn.ReadFromUDP(response)
-			checkError(err)
-
-			// write back to channel with byte response
-			recvChan <- response
-		}
-	}(sendChan, recvChan)
+	go functionOne(sendChan, recvChan, leaderAddr, wg)
 
 	// handle internal communication to java game
-	go func(sendChan chan<- []byte, recvChan <-chan []byte) {
-		addr, err := net.ResolveUDPAddr("udp", ":0")
-		checkError(err)
-		conn, err := net.ListenUDP("udp", addr)
-		checkError(err)
+	go functionTwo(sendChan, recvChan, raddr, timeToReply, wg)
 
-		// LOBBY PHASE; need to recv response from leader,
-		// pass message onto java side (first round start)
-
-		reply := <-recvChan
-		_, err = conn.WriteToUDP(reply, raddr)
-		checkError(err)
-
-		for {
-			// read some reply from the java game (update of move, or death)
-			var buf = make([]byte, 4096)
-			_, raddr, err := conn.ReadFromUDP(buf)
-			buf = bytes.Trim(buf, "\x00")
-			checkError(err)
-
-			// send buf to leader channel
-			sendChan <- buf
-
-			// read reply (timeToReply?) from leader (TODO: use a select w/ timeout?)
-			reply := <-recvChan
-
-			// TODO: only write back after receiving multiple replies, or after ticker timeout
-			if timeToReply {
-				_, err = conn.WriteToUDP(reply, raddr)
-				checkError(err)
-			}
-
-			time.Sleep(10 * time.Millisecond)
-		}
-	}(sendChan, recvChan)
-
-	// busy function forever
-	for {
-		time.Sleep(100)
-	}
+	wg.Wait();
 
 	fmt.Println("GOODBYE")
 

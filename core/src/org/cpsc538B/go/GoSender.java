@@ -39,7 +39,7 @@ public class GoSender implements Disposable {
     private InetAddress goAddress;
     private DatagramSocket serverSocket;
     private int goPort;
-    final ImmutableMap<String, Class<?>> nameToEvent = ImmutableMap.of("roundStart", RoundStartEvent.class, "myMove", MoveEvent.class, "moves", MovesEvent.class);
+    final ImmutableMap<String, Class<?>> nameToEvent = ImmutableMap.of("roundStart", RoundStartEvent.class, "myMove", MoveEvent.class, "moves", MovesEvent.class, "null", NullEvent.class);
 
     public void init(final String masterAddress, final boolean leader) {
         // spawn server
@@ -89,15 +89,18 @@ public class GoSender implements Disposable {
                     e.printStackTrace();
                 }
                 String sentence = new String(receivePacket.getData()).trim();
-                Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + sentence);
+                Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + sentence + " from " + receivePacket.getSocketAddress());
                 try {
                     goPort = receivePacket.getPort();
                     goAddress = receivePacket.getAddress();
                     final JsonNode jsonNode = JSONUtils.getMapper().readTree(sentence);
                     final String name = jsonNode.get("eventName").asText();
-                    Gdx.app.log(TronP2PGame.SERVER_TAG, "Event recieved is of type " + name);
+                    Gdx.app.log(TronP2PGame.SERVER_TAG, "Event received is of type " + name);
+		    Gdx.app.log("DEBUG", "RECEIVE " + sentence);
                     final Object event = JSONUtils.getMapper().treeToValue(jsonNode.get(name), nameToEvent.get(name));
+		    Gdx.app.log("   DEBUG", "size " + Integer.toString(goEvents.size()));
                     goEvents.add(event);
+		    Gdx.app.log("   DEBUG", "size " + Integer.toString(goEvents.size()));
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -108,6 +111,7 @@ public class GoSender implements Disposable {
     public void sendToGo(Object event) {
         final String jsonString = JSONUtils.toString(event);
         Gdx.app.log(TronP2PGame.SERVER_TAG, "Sending message " + System.lineSeparator() + jsonString);
+	Gdx.app.log("DEBUG", "SEND " + jsonString);
         byte[] sendData = jsonString.getBytes();
         DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, goAddress, goPort);
         try {
@@ -138,6 +142,19 @@ public class GoSender implements Disposable {
         int round;
     }
 
+
+
+    @Data
+    public static class NullEvent{
+	String eventName = "null";
+	int pid;
+	
+	public NullEvent(int pid) {
+	    this.pid = pid;
+	}
+    }
+
+    
     @Data
     @NoArgsConstructor
     public static class MoveEvent {
