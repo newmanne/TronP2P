@@ -96,26 +96,7 @@ func encodeMessage(message interface{}) []byte {
 	return val
 }
 
-//
-func leaderListener(leaderAddr string) {
-
-	playerCount := 1           // somehow know how many people I am waiting for
-	var responses map[int]bool // map pid -> response received
-
-	addr, err := net.ResolveUDPAddr("udp", leaderAddr)
-	checkError(err)
-	addr2, err := net.ResolveUDPAddr("udp", "localhost:"+strconv.Itoa(addr.Port))
-	checkError(err)
-	conn, err := net.ListenUDP("udp", addr2)
-	checkError(err)
-	fmt.Println("Leader has started")
-
-	var reply MovesMessage
-	raddrs := make([]*net.UDPAddr, 0)
-
-	// LOBBY PHASE
-	// before the general main loop, wait for playerCount messages,
-	// this will tell me who I need to send roundStarts to.
+func initLobby(conn *net.UDPConn, playerCount int, raddrs []*net.UDPAddr) {
 	for {
 		var buf = make([]byte, 4096)
 		fmt.Println("Waiting for a hello message")
@@ -145,28 +126,55 @@ func leaderListener(leaderAddr string) {
 			break
 		}
 	}
+}
+
+func newRound(conn *net.UDPConn, raddrs []*net.UDPAddr) (reply MovesMessage, responses map[int]bool) {
+	// create message that new round is starting
+	byt := newRoundMessage()
+	
+	// send message to everyone that new round has started
+	fmt.Println("Sending the following round start message " + string(byt))
+	
+	for i := range raddrs {
+		_, err := conn.WriteToUDP(byt, raddrs[i])
+		checkError(err)
+	}
+	
+	responses = make(map[int]bool)
+	
+	reply = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: make([]MyMove, 0)}
+	return reply, responses
+}
+
+func leaderListener(leaderAddr string) {
+
+	playerCount := 1           // somehow know how many people I am waiting for
+	var responses map[int]bool // map pid -> response received
+
+	addr, err := net.ResolveUDPAddr("udp", leaderAddr)
+	checkError(err)
+	addr2, err := net.ResolveUDPAddr("udp", "localhost:"+strconv.Itoa(addr.Port))
+	checkError(err)
+	conn, err := net.ListenUDP("udp", addr2)
+	checkError(err)
+	fmt.Println("Leader has started")
+
+	var reply MovesMessage
+	raddrs := make([]*net.UDPAddr, 0)
+
+	// LOBBY PHASE
+	// before the general main loop, wait for playerCount messages,
+	// this will tell me who I need to send roundStarts to.
+	initLobby(conn, playerCount, raddrs)
 
 	// MAIN LOOP SECTION
 	isNewRound := true
 	for {
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
-			// create message that new round is starting
-			byt := newRoundMessage()
-
-			// send message to everyone that new round has started
-			fmt.Println("Sending the following round start message " + string(byt))
-
-			for i := range raddrs {
-				_, err := conn.WriteToUDP(byt, raddrs[i])
-				checkError(err)
-			}
-
+			reply, responses = newRound(conn, raddrs)
 			isNewRound = false
-			responses = make(map[int]bool)
 			raddrs = make([]*net.UDPAddr, 0)
-
-			reply = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: make([]MyMove, 0)}
 		}
 
 		// read a message from some follower
