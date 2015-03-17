@@ -202,7 +202,7 @@ func leaderListener(leaderAddr string) {
 			}
 			// start a new round of communication
 			isNewRound = true
-		}
+		}		
 	}
 }
 
@@ -274,13 +274,14 @@ func functionTwo(sendChan, recvChan chan []byte, raddr *net.UDPAddr, timeToReply
 
 	for {
 		// read some reply from the java game (update of move, or death)
+		time.Sleep(100 * time.Millisecond)
 		var buf = make([]byte, 4096)
 		_, raddr, err := conn.ReadFromUDP(buf)
 		buf = bytes.Trim(buf, "\x00")
 		//FIRST//
 		fmt.Println("DEBUG RECEIVE", string(buf))
 		checkError(err)
-
+		
 		// send buf to leader channel
 		sendChan <- buf
 
@@ -294,8 +295,6 @@ func functionTwo(sendChan, recvChan chan []byte, raddr *net.UDPAddr, timeToReply
 			_, err = conn.WriteToUDP(reply, raddr)
 			checkError(err)
 		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 

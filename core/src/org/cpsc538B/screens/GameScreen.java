@@ -89,6 +89,7 @@ public class GameScreen extends ScreenAdapter {
 
         for (Object event : goEvents) {	
 		if (event instanceof GoSender.RoundStartEvent) {
+		    Gdx.app.log("AFSKSKFJFJKSJKSFSKFJSKJF", playerPositions.get(this.pid).getX() + " " + playerPositions.get(this.pid).getY());
                 final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(getPositionAndDirection());
                 switch (tronInput.getProvisionalDirection()) {
                     case LEFT:
@@ -109,6 +110,7 @@ public class GameScreen extends ScreenAdapter {
                         break;
                 }
                 game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
+		Gdx.app.log("AFSKSKFJFJKSJKSFSKFJSKJF", playerPositions.get(this.pid).getX() + " " + playerPositions.get(this.pid).getY());
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves
                 for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
@@ -116,6 +118,7 @@ public class GameScreen extends ScreenAdapter {
                     grid[move.getX()][move.getY()] = moveEvent.getPid();
 		    Gdx.app.log(TronP2PGame.GO_STDOUT_TAG, "MOVE " + move.getX() + " " + move.getY());
                     playerPositions.put(pid, move);
+		    Gdx.app.log("AFSKSKFJFJKSJKSFSKFJSKJF", playerPositions.get(this.pid).getX() + " " + playerPositions.get(this.pid).getY());
                 }
 		//game.getGoSender().sendToGo(new GoSender.MoveEvent(new PositionAndDirection(getPositionAndDirection()), pid));
 		game.getGoSender().sendToGo(new GoSender.NullEvent(pid));
