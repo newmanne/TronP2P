@@ -7,8 +7,8 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"time"
 	"sync"
+	"time"
 )
 
 
@@ -50,7 +50,6 @@ type MovesMessage struct {
 	Round     int      `json:"round"`
 	Moves     []MyMove `json:"moves"`
 }
-	
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
@@ -81,13 +80,7 @@ func parseMessage(buf []byte) MovesMessage {
 		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: int(p)}}}
 
 	default:
-		fmt.Println("ERROR! This should not happen.");
-		/*x, e := dat["x"].(float64)
-		fmt.Println(e)
-		y, e := dat["y"].(float64)
-		d, e := dat["direction"].(string)
-		p, e := dat["pid"].(float64)
-		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: int(p)}}}*/
+		fmt.Println("ERROR! This should not happen.")
 	}
 
 	fmt.Println("parsed message: ", res)
@@ -184,17 +177,17 @@ func initLobby(conn *net.UDPConn, playerCount int, raddrs []*net.UDPAddr) {
 func newRound(conn *net.UDPConn, raddrs []*net.UDPAddr) (reply MovesMessage, responses map[int]bool) {
 	// create message that new round is starting
 	byt := newRoundMessage()
-	
+
 	// send message to everyone that new round has started
 	fmt.Println("Sending the following round start message " + string(byt))
-	
+
 	for i := range raddrs {
 		_, err := conn.WriteToUDP(byt, raddrs[i])
 		checkError(err)
 	}
-	
+
 	responses = make(map[int]bool)
-	
+
 	reply = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: make([]MyMove, 0)}
 	return reply, responses
 }
@@ -234,14 +227,14 @@ func leaderListener(leaderAddr string) {
 		var buf = make([]byte, 4096)
 		_, raddr, err := conn.ReadFromUDP(buf)
 		buf = bytes.Trim(buf, "\x00")
-		fmt.Println("DEBUG SERVER?", string(buf), conn.LocalAddr());
+		fmt.Println("DEBUG SERVER?", string(buf), conn.LocalAddr())
 		checkError(err)
 
 		// parse the new message into a MovesMessage struct (usually)
 		commands := parseMessage(buf)
 
 		// append moves received to list of all moves recieved for current round
-		fmt.Println("DEBUG BUG?", string(encodeMessage(reply)));
+		fmt.Println("DEBUG BUG?", string(encodeMessage(reply)))
 		if commands.EventName == "moves" && commands.Round == gameState.Round {
 			for _, move := range commands.Moves {
 				reply.Moves = append(reply.Moves, move)
@@ -250,7 +243,7 @@ func leaderListener(leaderAddr string) {
 			// keep track of who to respond to
 			raddrs = append(raddrs, raddr)
 		}
-		fmt.Println("DEBUG BUG?", string(encodeMessage(reply)));
+		fmt.Println("DEBUG BUG?", string(encodeMessage(reply)))
 
 		// end condition; reply to my followers if I have been messaged by all of them
 		if len(responses) == playerCount {
@@ -263,17 +256,17 @@ func leaderListener(leaderAddr string) {
 			}
 			// start a new round of communication
 			isNewRound = true
-		}		
+		}
 	}
 }
 
 func functionOne(sendChan, recvChan chan []byte, leaderAddr string, wg sync.WaitGroup) {
 	defer wg.Done()
-	addr, err := net.ResolveUDPAddr("udp", ":0")
-	
+	addr, err := net.ResolveUDPAddr("udp", "localhost:0")
+
 	checkError(err)
 	conn, err := net.ListenUDP("udp", addr)
-	fmt.Println(conn.LocalAddr());
+	fmt.Println(conn.LocalAddr())
 	checkError(err)
 
 	// write message to leader to let them know I exist (LOBBY PHASE)
@@ -310,20 +303,19 @@ func functionOne(sendChan, recvChan chan []byte, leaderAddr string, wg sync.Wait
 		response = bytes.Trim(response, "\x00")
 		//THIRD//
 		fmt.Println("DEBUG RECEIVE RESPONSE?", string(response), " from ", conn.LocalAddr())
-		
+
 		// write back to channel with byte response
 		recvChan <- response
 	}
 }
 
-
-func functionTwo(sendChan, recvChan chan []byte, raddr *net.UDPAddr, timeToReply bool, wg sync.WaitGroup) {
+func functionTwo(sendChan, recvChan chan []byte, raddr *net.TCPAddr, timeToReply bool, wg sync.WaitGroup) {
 	defer wg.Done()
-	addr, err := net.ResolveUDPAddr("udp", ":0")
+	addr, err := net.ResolveUDPAddr("udp", "localhost:0")
 	checkError(err)
-	
+
 	conn, err := net.ListenUDP("udp", addr)
-	fmt.Println(conn.LocalAddr());
+	fmt.Println(conn.LocalAddr())
 	checkError(err)
 
 	// LOBBY PHASE; need to recv response from leader,
@@ -342,7 +334,7 @@ func functionTwo(sendChan, recvChan chan []byte, raddr *net.UDPAddr, timeToReply
 		//FIRST//
 		fmt.Println("DEBUG RECEIVE", string(buf))
 		checkError(err)
-		
+
 		// send buf to leader channel
 		sendChan <- buf
 
@@ -391,17 +383,16 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	
+
 	// handle communication through leader channel (follower code to leader)
 	go functionOne(sendChan, recvChan, leaderAddr, wg)
 
 	// handle internal communication to java game
 	go functionTwo(sendChan, recvChan, javaRAddr, timeToReply, wg)
 
-	wg.Wait();
+	wg.Wait()
 
 	fmt.Println("GOODBYE")
-
 }
 
 // If error is non-nil, print it out and halt.

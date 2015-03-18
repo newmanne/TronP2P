@@ -7,6 +7,8 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
 import com.badlogic.gdx.scenes.scene2d.ui.Label.LabelStyle;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import lombok.Data;
 import org.cpsc538B.screens.GameScreen;
 import org.cpsc538B.utils.GameUtils;
@@ -26,6 +28,8 @@ public class Assets {
     private FreeTypeFontGenerator generator;
     private AssetManager assetManager;
     private Skin skin;
+    private final TextButton.TextButtonStyle textButtonStyle;
+    private final TextField.TextFieldStyle textFieldStyle;
 
     public Assets() {
         generator = new FreeTypeFontGenerator(Gdx.files.internal("arial.ttf"));
@@ -39,6 +43,11 @@ public class Assets {
         assetManager.load(Gdx.files.internal(SKIN_FILE).path(), Skin.class);
         assetManager.finishLoading();
         skin = assetManager.get("skins/uiskin.json", Skin.class);
+
+        textFieldStyle = skin.get(TextField.TextFieldStyle.class);
+        textFieldStyle.font = font;
+        textButtonStyle = skin.get(TextButton.TextButtonStyle.class);
+        textButtonStyle.font = font;
     }
 
     public void resizeStyles() {

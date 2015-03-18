@@ -69,11 +69,10 @@ public class GameScreen extends ScreenAdapter {
             new Vector2(0, 0)
     };
 
-    public GameScreen(TronP2PGame game, PositionAndDirection startingPosition, int pid) {
+    public GameScreen(TronP2PGame game, int pid, Map<Integer, PositionAndDirection> startingPositions) {
         this.game = game;
-        playerPositions = new HashMap<>();
-        playerPositions.put(pid, startingPosition);
-        tronInput = new TronInput(startingPosition.getDirection());
+        playerPositions = startingPositions;
+        tronInput = new TronInput(getPositionAndDirection().getDirection());
         this.pid = pid;
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
     }
@@ -87,9 +86,8 @@ public class GameScreen extends ScreenAdapter {
     public void render(float delta) {
         final Collection<Object> goEvents = game.getGoSender().getGoEvents();
 
-        for (Object event : goEvents) {	
-		if (event instanceof GoSender.RoundStartEvent) {
-		    Gdx.app.log("AFSKSKFJFJKSJKSFSKFJSKJF", playerPositions.get(this.pid).getX() + " " + playerPositions.get(this.pid).getY());
+        for (Object event : goEvents) {
+            if (event instanceof GoSender.RoundStartEvent) {
                 final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(getPositionAndDirection());
                 switch (tronInput.getProvisionalDirection()) {
                     case LEFT:
@@ -110,18 +108,13 @@ public class GameScreen extends ScreenAdapter {
                         break;
                 }
                 game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
-		Gdx.app.log("AFSKSKFJFJKSJKSFSKFJSKJF", playerPositions.get(this.pid).getX() + " " + playerPositions.get(this.pid).getY());
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves
                 for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
                     PositionAndDirection move = moveEvent.getPositionAndDirection();
                     grid[move.getX()][move.getY()] = moveEvent.getPid();
-		    Gdx.app.log(TronP2PGame.GO_STDOUT_TAG, "MOVE " + move.getX() + " " + move.getY());
                     playerPositions.put(pid, move);
-		    Gdx.app.log("AFSKSKFJFJKSJKSFSKFJSKJF", playerPositions.get(this.pid).getX() + " " + playerPositions.get(this.pid).getY());
                 }
-		//game.getGoSender().sendToGo(new GoSender.MoveEvent(new PositionAndDirection(getPositionAndDirection()), pid));
-		game.getGoSender().sendToGo(new GoSender.NullEvent(pid));
             } else {
                 throw new IllegalStateException();
             }
@@ -132,8 +125,8 @@ public class GameScreen extends ScreenAdapter {
 
         // scroll
         viewport.getCamera().position.set(Math.min(GRID_WIDTH * GRID_SIZE - V_WIDTH / 2, Math.max(V_WIDTH / 2, getPositionAndDirection().getX() * GRID_SIZE)),
-                                          Math.min(GRID_HEIGHT * GRID_SIZE - V_HEIGHT / 2, Math.max(V_HEIGHT / 2, getPositionAndDirection().getY() * GRID_SIZE)),
-                                          0);
+                Math.min(GRID_HEIGHT * GRID_SIZE - V_HEIGHT / 2, Math.max(V_HEIGHT / 2, getPositionAndDirection().getY() * GRID_SIZE)),
+                0);
 
         // render
         viewport.apply();
