@@ -11,11 +11,7 @@ import (
 	"sync"
 )
 
-type GameState struct {
-	Round int
-}
 
-var gameState GameState
 
 type MyMove struct {
 	X         int    `json:"x"`
@@ -23,6 +19,14 @@ type MyMove struct {
 	Direction string `json:"direction"`
 	Pid       int    `json:"pid"`
 }
+
+type GameState struct {
+	Round int
+	Positions map[int]MyMove
+	AddrToPid map[*net.UDPAddr]int
+}
+var gameState GameState
+
 
 type RoundStart struct {
 	Round int `json:"round"`
@@ -96,8 +100,53 @@ func encodeMessage(message interface{}) []byte {
 	return val
 }
 
+
+
+// TODO: randomize X, Y, Direction based on map size, and other player positions
+func CreateInitPlayerPosition(pid int) MyMove {
+	return MyMove{X: 0, Y: 0, Direction:"UP", Pid: pid}
+}
+
+
+// TODO: parse message, check if eventName == join
+func isJoinMessage(buf []byte) bool {
+	return true	
+}
+
+// TODO: parse message, check if eventName == start, and pid/addr == monarch?
+func isStartMessage(buf []byte) bool {
+	return true
+}
+
+
+// TODO: given pid, return message event == startGame (or something), that includes
+// all player start positions, this players pid, and their leader they refer to from now on
+func startGameMessage(pid int) []byte {
+	return nil
+}
+
+/*
+ At the end of the lobby session, the following things must be true:
+ 1) all players know the IP, pid, and start positions of all other players
+ 2) all players know their immediate leader
+ 3) all players acknowledge game begins?
+
+ General structure:
+ - monarch sarts lobby session
+ - monarch is pid=1
+ - as players join, they are assigned pid in order of arrival
+ - monarch closes lobby with start game command
+ - upon end of lobby session, monarch sends req info to all players (TCP?)
+ - once this is done, lobby session ends and monarch starts game.
+*/
 func initLobby(conn *net.UDPConn, playerCount int, raddrs []*net.UDPAddr) {
+	
+	// start of new game
+	gameState.Positions = make(map[int]MyMove)
+	gameState.AddrToPid = make(map[*net.UDPAddr]int)
+
 	for {
+		// wait for message from some client
 		var buf = make([]byte, 4096)
 		fmt.Println("Waiting for a hello message")
 		_, raddr, err := conn.ReadFromUDP(buf)
@@ -105,24 +154,28 @@ func initLobby(conn *net.UDPConn, playerCount int, raddrs []*net.UDPAddr) {
 		checkError(err)
 		fmt.Println("Leader has received a hello message")
 
-		in := false
-		for _, item := range raddrs {
-			if item == raddr {
-				in = true
+		// what type of message is it? join or start game?
+		// TODO: decide if message is hello or start game.
+
+		if isJoinMessage(buf) {
+			// if message is hello
+			if _, knownPlayer := gameState.AddrToPid[raddr]; !knownPlayer {
+				pid := len(gameState.Positions) + 1
+				gameState.Positions[pid] = CreateInitPlayerPosition(pid)
+				gameState.AddrToPid[raddr] = pid
 			}
 		}
-		if !in {
-			raddrs = append(raddrs, raddr)
-		}
-		if len(raddrs) == playerCount {
-			byt := newRoundMessage()
+		else if isStartMessage(buf) {
+			// if message is start game
 
-			// send message to all followers
-			for i := range raddrs {
-				_, err = conn.WriteToUDP(byt, raddrs[i])
+			// send message to all players to start game
+			for player, pid := range gameState.AddrToPid {
+				// TODO: use TCP to confirm message is received?
+				newGameMsg := startGameMessage(pid)
+				_, err = conn.WriteToUDP(newGameMsg, player)
 				checkError(err)
 			}
-			// start a new round of communication
+			// end lobby phase, prepare to send round messages next
 			break
 		}
 	}
@@ -328,7 +381,7 @@ func main() {
 
 	fmt.Println("Trying to connect to java on localhost:" + javaPort)
 
-	raddr, err := net.ResolveUDPAddr("udp", "localhost:"+javaPort)
+	javaRAddr, err := net.ResolveUDPAddr("udp", "localhost:"+javaPort)
 	checkError(err)
 
 	// if I am the leader, listen for rounds to confirm them
@@ -343,7 +396,7 @@ func main() {
 	go functionOne(sendChan, recvChan, leaderAddr, wg)
 
 	// handle internal communication to java game
-	go functionTwo(sendChan, recvChan, raddr, timeToReply, wg)
+	go functionTwo(sendChan, recvChan, javaRAddr, timeToReply, wg)
 
 	wg.Wait();
 
