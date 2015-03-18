@@ -31,22 +31,22 @@ public class GameScreen extends ScreenAdapter {
     public static final int UNOCCUPIED = 0;
 
     // grid dimensions
-    public final int GRID_WIDTH = 200;
-    public final int GRID_HEIGHT = 200;
+    public final static int GRID_WIDTH = 200;
+    public final static int GRID_HEIGHT = 200;
 
     // display size of grid (how big each square is)
     public final static int GRID_SIZE = 10;
 
     // player colors
-    private final ImmutableMap<Integer, Color> pidToColor = ImmutableMap.<Integer, Color>builder()
-            .put(1, Color.RED)
-            .put(2, Color.BLUE)
-            .put(3, Color.GREEN)
-            .put(4, Color.PURPLE)
-            .put(5, Color.GRAY)
-            .put(6, Color.ORANGE)
-            .put(7, Color.OLIVE)
-            .put(8, Color.MAGENTA)
+    private final ImmutableMap<String, Color> pidToColor = ImmutableMap.<String, Color>builder()
+            .put("1", Color.RED)
+            .put("2", Color.BLUE)
+            .put("3", Color.GREEN)
+            .put("4", Color.PURPLE)
+            .put("5", Color.GRAY)
+            .put("6", Color.ORANGE)
+            .put("7", Color.OLIVE)
+            .put("8", Color.MAGENTA)
             .build();
 
     // libgdx stuff
@@ -55,9 +55,9 @@ public class GameScreen extends ScreenAdapter {
     private TronInput tronInput;
 
     // game state
-    private final Map<Integer, PositionAndDirection> playerPositions;
+    private final Map<String, PositionAndDirection> playerPositions;
     private final int[][] grid = new int[GRID_WIDTH][GRID_HEIGHT];
-    private final int pid;
+    private final String pid;
 
     private float accumulator;
 
@@ -69,11 +69,11 @@ public class GameScreen extends ScreenAdapter {
             new Vector2(0, 0)
     };
 
-    public GameScreen(TronP2PGame game, int pid, Map<Integer, PositionAndDirection> startingPositions) {
+    public GameScreen(TronP2PGame game, String pid, Map<String , PositionAndDirection> startingPositions) {
         this.game = game;
+        this.pid = pid;
         playerPositions = startingPositions;
         tronInput = new TronInput(getPositionAndDirection().getDirection());
-        this.pid = pid;
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
     }
 
@@ -112,7 +112,7 @@ public class GameScreen extends ScreenAdapter {
                 // process moves
                 for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
                     PositionAndDirection move = moveEvent.getPositionAndDirection();
-                    grid[move.getX()][move.getY()] = moveEvent.getPid();
+                    grid[move.getX()][move.getY()] = Integer.parseInt(moveEvent.getPid());
                     playerPositions.put(pid, move);
                 }
             } else {
@@ -166,7 +166,7 @@ public class GameScreen extends ScreenAdapter {
             for (int j = 0; j < grid[i].length; j++) {
                 int square = grid[i][j];
                 if (square != UNOCCUPIED) {
-                    shapeRenderer.setColor(pidToColor.get(square));
+                    shapeRenderer.setColor(pidToColor.get(Integer.toString(square)));
                     shapeRenderer.rect(i * GRID_SIZE, j * GRID_SIZE, GRID_SIZE, GRID_SIZE);
                 }
             }

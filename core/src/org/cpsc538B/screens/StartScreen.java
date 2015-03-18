@@ -33,6 +33,9 @@ public class StartScreen extends ScreenAdapter {
     private final Stage stage;
     private final Table rootTable;
     private final TronP2PGame game;
+    private boolean readyToGo = false;
+    private String pid;
+    private Map<String, PositionAndDirection> startingPositions;
 
     public StartScreen(TronP2PGame game) {
         this.game = game;
@@ -48,8 +51,8 @@ public class StartScreen extends ScreenAdapter {
         final TextButton startAGame = new TextButton(START_A_GAME, game.getAssets().getTextButtonStyle());
         final TextButton joinAGame = new TextButton(JOIN_A_GAME, game.getAssets().getTextButtonStyle());
         final TextButton createAGame = new TextButton(CREATE_A_GAME, game.getAssets().getTextButtonStyle());
-        startAGame.setTouchable(Touchable.disabled);
-        startAGame.setDisabled(true);
+//        startAGame.setTouchable(Touchable.disabled);
+//        startAGame.setDisabled(true);
 
         createAGame.addListener(new ClickListener() {
             @Override
@@ -57,13 +60,16 @@ public class StartScreen extends ScreenAdapter {
                 StartScreen.this.game.getGoSender().init(leaderIpField.getText(), true, new GoSender.GoInitializedCallback() {
                     @Override
                     public void onGoStarted() {
-                        startAGame.setDisabled(false);
-                        startAGame.setTouchable(Touchable.enabled);
+//                        startAGame.setDisabled(false);
+//                        startAGame.setTouchable(Touchable.enabled);
                     }
 
                     @Override
-                    public void onGameStarted(int pid, Map<Integer, PositionAndDirection> startingPositions) {
-                        StartScreen.this.game.setScreen(new GameScreen(StartScreen.this.game, pid, startingPositions));
+                    public void onGameStarted(String pid, Map<String, PositionAndDirection> startingPositions) {
+                        // need the actual switch to happpen on the thread in the render loop unfortunately
+                        StartScreen.this.pid = pid;
+                        StartScreen.this.startingPositions = startingPositions;
+                        StartScreen.this.readyToGo = true;
                     }
                 });
                 joinAGame.setDisabled(true);
@@ -75,8 +81,7 @@ public class StartScreen extends ScreenAdapter {
         startAGame.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                // TODO: send a "let's actually start" event
-                // StartScreen.this.game.getGoSender().sendToGo();
+                StartScreen.this.game.getGoSender().sendToGo("START");
             }
         });
         joinAGame.addListener(new ClickListener() {
@@ -112,6 +117,9 @@ public class StartScreen extends ScreenAdapter {
         GameUtils.clearScreen();
         update(delta);
         stage.draw();
+        if (readyToGo) {
+            game.setScreen(new GameScreen(game, pid, startingPositions));
+        }
     }
 
     protected void update(float delta) {

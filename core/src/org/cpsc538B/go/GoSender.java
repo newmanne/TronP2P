@@ -17,6 +17,7 @@ import lombok.NoArgsConstructor;
 import org.cpsc538B.TronP2PGame;
 import org.cpsc538B.model.Direction;
 import org.cpsc538B.model.PositionAndDirection;
+import org.cpsc538B.screens.GameScreen;
 import org.cpsc538B.utils.JSONUtils;
 
 import java.io.BufferedReader;
@@ -40,7 +41,7 @@ public class GoSender implements Disposable {
     private ServerSocket serverSocket;
     private Socket goSocket;
     private int goPort;
-    final ImmutableMap<String, Class<?>> nameToEvent = ImmutableMap.of("roundStart", RoundStartEvent.class, "myMove", MoveEvent.class, "moves", MovesEvent.class, "null", NullEvent.class);
+    final ImmutableMap<String, Class<?>> nameToEvent = ImmutableMap.of("roundStart", RoundStartEvent.class, "myMove", MoveEvent.class, "moves", MovesEvent.class, "gameStart", GameStartEvent.class);
     private BufferedReader goInputStream;
     private PrintWriter goOutputStream;
 
@@ -59,7 +60,7 @@ public class GoSender implements Disposable {
         new Thread(() -> {
             try {
                 Runtime r = Runtime.getRuntime();
-                final ProcessBuilder processBuilder = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader));
+                final ProcessBuilder processBuilder = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader), Integer.toString(GameScreen.GRID_WIDTH), Integer.toString(GameScreen.GRID_HEIGHT));
                 Gdx.app.log(TronP2PGame.LOG_TAG, "Running the following command:" + System.lineSeparator() + processBuilder.command() + System.lineSeparator());
                 goProcess = processBuilder.start();
 
@@ -87,32 +88,30 @@ public class GoSender implements Disposable {
             } catch (IOException e) {
                 Gdx.app.log(TronP2PGame.SERVER_TAG, "Failed to accept go client", e);
             }
+            Gdx.app.log(TronP2PGame.SERVER_TAG, "Go client connected from " + goSocket.toString());
             try {
                 goInputStream = new BufferedReader(new InputStreamReader(goSocket.getInputStream()));
-                goOutputStream = new PrintWriter(goSocket.getOutputStream());
+                goOutputStream = new PrintWriter(goSocket.getOutputStream(), true);
             } catch (IOException e) {
                 e.printStackTrace();
             }
             while (goSocket.isConnected()) {
                 try {
-                    if (goInputStream.ready()) {
-                        final String message = goInputStream.readLine();
-                        if ((message != null) && (message.length() != 0)) {
-                            Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + message);
-                            final JsonNode jsonNode = JSONUtils.getMapper().readTree(message);
-                            final String name = jsonNode.get("eventName").asText();
-                            Gdx.app.log(TronP2PGame.SERVER_TAG, "Event received is of type " + name);
-                            final Object event = JSONUtils.getMapper().treeToValue(jsonNode.get(name), nameToEvent.get(name));
-                            if (event instanceof GameStartEvent) {
-                                GameStartEvent gameStartEvent = (GameStartEvent) event;
-                                callback.onGameStarted(gameStartEvent.getPid(), gameStartEvent.getMoves());
-                            } else {
-                                goEvents.add(event);
-                            }
-                        }
+                    final String message = goInputStream.readLine();
+                    Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + message);
+                    final JsonNode jsonNode = JSONUtils.getMapper().readTree(message);
+                    final String name = jsonNode.get("eventName").asText();
+                    Gdx.app.log(TronP2PGame.SERVER_TAG, "Event received is of type " + name);
+                    final Object event = JSONUtils.getMapper().treeToValue(jsonNode.get(name), nameToEvent.get(name));
+                    if (event instanceof GameStartEvent) {
+                        GameStartEvent gameStartEvent = (GameStartEvent) event;
+                        callback.onGameStarted(gameStartEvent.getPid(), gameStartEvent.getStartingPositions());
+                    } else {
+                        goEvents.add(event);
                     }
                 } catch (IOException e) {
                     e.printStackTrace();
+                    break;
                 }
             }
         }).start();
@@ -123,6 +122,11 @@ public class GoSender implements Disposable {
         final String jsonString = JSONUtils.toString(event);
         Gdx.app.log(TronP2PGame.SERVER_TAG, "Sending message: " + jsonString);
         goOutputStream.write(jsonString);
+    }
+
+    public void sendToGo(String string) {
+        Preconditions.checkNotNull(goOutputStream != null, "Go output stream is null");
+        goOutputStream.println(string);
     }
 
     public Collection<Object> getGoEvents() {
@@ -160,26 +164,14 @@ public class GoSender implements Disposable {
     @Data
     public static class RoundStartEvent {
         String eventName = "roundStart";
-        int pid;
+        String pid;
         int round;
-    }
-
-
-    @Data
-    public static class NullEvent {
-        String eventName = "null";
-        int pid;
-
-        public NullEvent(int pid) {
-            this.pid = pid;
-        }
     }
 
     @Data
     public static class GameStartEvent {
-        String eventName = "gameStart";
-        int pid;
-        Map<Integer, PositionAndDirection> moves;
+        String pid;
+        Map<String, PositionAndDirection> startingPositions;
     }
 
 
@@ -188,7 +180,7 @@ public class GoSender implements Disposable {
     public static class MoveEvent {
         String eventName = "myMove";
 
-        public MoveEvent(PositionAndDirection positionAndDirection, int pid) {
+        public MoveEvent(PositionAndDirection positionAndDirection, String pid) {
             this.x = positionAndDirection.getX();
             this.y = positionAndDirection.getY();
             this.direction = positionAndDirection.getDirection();
@@ -204,7 +196,7 @@ public class GoSender implements Disposable {
             return new PositionAndDirection(x, y, direction);
         }
 
-        int pid;
+        String pid;
     }
 
     @Data
@@ -235,7 +227,7 @@ public class GoSender implements Disposable {
     public interface GoInitializedCallback {
         void onGoStarted();
 
-        void onGameStarted(int pid, Map<Integer, PositionAndDirection> startingPositions);
+        void onGameStarted(String pid, Map<String, PositionAndDirection> startingPositions);
     }
 
 }
