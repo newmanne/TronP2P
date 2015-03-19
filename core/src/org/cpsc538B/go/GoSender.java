@@ -97,12 +97,14 @@ public class GoSender implements Disposable {
             }
             while (goSocket.isConnected()) {
                 try {
+                    // Note that all messages are delineated by lines
                     final String message = goInputStream.readLine();
                     Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + message);
                     final JsonNode jsonNode = JSONUtils.getMapper().readTree(message);
                     final String name = jsonNode.get("eventName").asText();
                     Gdx.app.log(TronP2PGame.SERVER_TAG, "Event received is of type " + name);
                     final Object event = JSONUtils.getMapper().treeToValue(jsonNode.get(name), nameToEvent.get(name));
+                    // special case if a game start event is received
                     if (event instanceof GameStartEvent) {
                         GameStartEvent gameStartEvent = (GameStartEvent) event;
                         callback.onGameStarted(gameStartEvent.getPid(), gameStartEvent.getStartingPositions());
@@ -119,9 +121,10 @@ public class GoSender implements Disposable {
 
     public void sendToGo(Object event) {
         Preconditions.checkNotNull(goOutputStream != null, "Go output stream is null");
+        Preconditions.checkNotNull(event, "Event is null");
         final String jsonString = JSONUtils.toString(event);
         Gdx.app.log(TronP2PGame.SERVER_TAG, "Sending message: " + jsonString);
-        goOutputStream.write(jsonString);
+        goOutputStream.println(jsonString);
     }
 
     public void sendToGo(String string) {
@@ -225,8 +228,6 @@ public class GoSender implements Disposable {
     }
 
     public interface GoInitializedCallback {
-        void onGoStarted();
-
         void onGameStarted(String pid, Map<String, PositionAndDirection> startingPositions);
     }
 

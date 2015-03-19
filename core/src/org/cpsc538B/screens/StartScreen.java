@@ -51,31 +51,24 @@ public class StartScreen extends ScreenAdapter {
         final TextButton startAGame = new TextButton(START_A_GAME, game.getAssets().getTextButtonStyle());
         final TextButton joinAGame = new TextButton(JOIN_A_GAME, game.getAssets().getTextButtonStyle());
         final TextButton createAGame = new TextButton(CREATE_A_GAME, game.getAssets().getTextButtonStyle());
-//        startAGame.setTouchable(Touchable.disabled);
-//        startAGame.setDisabled(true);
+        startAGame.setTouchable(Touchable.disabled);
+        startAGame.setDisabled(true);
 
         createAGame.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), true, new GoSender.GoInitializedCallback() {
-                    @Override
-                    public void onGoStarted() {
-//                        startAGame.setDisabled(false);
-//                        startAGame.setTouchable(Touchable.enabled);
-                    }
-
-                    @Override
-                    public void onGameStarted(String pid, Map<String, PositionAndDirection> startingPositions) {
-                        // need the actual switch to happpen on the thread in the render loop unfortunately
-                        StartScreen.this.pid = pid;
-                        StartScreen.this.startingPositions = startingPositions;
-                        StartScreen.this.readyToGo = true;
-                    }
+                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), true, (pid1, startingPositions1) -> {
+                    // need the actual switch to happpen on the thread in the render loop unfortunately
+                    StartScreen.this.pid = pid1;
+                    StartScreen.this.startingPositions = startingPositions1;
+                    StartScreen.this.readyToGo = true;
                 });
                 joinAGame.setDisabled(true);
                 joinAGame.setTouchable(Touchable.disabled);
                 createAGame.setDisabled(true);
                 createAGame.setTouchable(Touchable.disabled);
+                startAGame.setDisabled(false);
+                startAGame.setTouchable(Touchable.enabled);
             }
         });
         startAGame.addListener(new ClickListener() {
@@ -87,6 +80,16 @@ public class StartScreen extends ScreenAdapter {
         joinAGame.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
+                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), false, (pid1, startingPositions1) -> {
+                    // need the actual switch to happpen on the thread in the render loop unfortunately
+                    StartScreen.this.pid = pid1;
+                    StartScreen.this.startingPositions = startingPositions1;
+                    StartScreen.this.readyToGo = true;
+                });
+                joinAGame.setDisabled(true);
+                joinAGame.setTouchable(Touchable.disabled);
+                createAGame.setDisabled(true);
+                createAGame.setTouchable(Touchable.disabled);
             }
         });
 
