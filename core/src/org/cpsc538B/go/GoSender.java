@@ -3,13 +3,7 @@ package org.cpsc538B.go;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Disposable;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import lombok.Data;
@@ -166,7 +160,6 @@ public class GoSender implements Disposable {
 
     @Data
     public static class RoundStartEvent {
-        String eventName = "roundStart";
         String pid;
         int round;
     }
@@ -203,28 +196,8 @@ public class GoSender implements Disposable {
     }
 
     @Data
-    @JsonDeserialize(using = MovesEventDeserializer.class)
     public static class MovesEvent {
-        String eventName = "moves";
-        List<MoveEvent> moves;
-    }
-
-    public static class MovesEventDeserializer extends JsonDeserializer<MovesEvent> {
-
-        @Override
-        public MovesEvent deserialize(JsonParser jsonParser, DeserializationContext ctxt) throws IOException, JsonProcessingException {
-            if (jsonParser.getCurrentToken() == JsonToken.START_ARRAY) {
-                List<MoveEvent> permissions = new ArrayList<>();
-                while (jsonParser.nextToken() != JsonToken.END_ARRAY) {
-                    permissions.add(jsonParser.readValueAs(MoveEvent.class));
-                }
-                MovesEvent movesEvent = new MovesEvent();
-                movesEvent.setMoves(permissions);
-                return movesEvent;
-            }
-            throw new IllegalStateException();
-        }
-
+        Map<String, PositionAndDirection> moves;
     }
 
     public interface GoInitializedCallback {

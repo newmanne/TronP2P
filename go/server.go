@@ -53,9 +53,13 @@ type MyMoveMessage struct {
 }
 
 type MovesMessage struct {
-	EventName string   `json:"eventName"`
-	Round     int      `json:"round"`
-	Moves     []MyMove `json:"moves"`
+	EventName string `json:"eventName"`
+	Round     int    `json:"round"`
+	Moves     `json:"moves"`
+}
+
+type Moves struct {
+	Moves map[string]Move `json:"moves"`
 }
 
 type GameStart struct {
@@ -106,7 +110,7 @@ func newRoundMessage() []byte {
 	return encodeMessage(message)
 }
 
-func parseMessage(buf []byte) MovesMessage {
+func parseMessage(buf []byte) (Move, string) {
 	fmt.Println("Parsing the following message " + string(buf))
 	var dat map[string]interface{}
 	err := json.Unmarshal(buf, &dat)
@@ -116,22 +120,21 @@ func parseMessage(buf []byte) MovesMessage {
 
 	// TODO: error handling, default actions
 	eventName := dat["eventName"].(string)
-	var res MovesMessage
+	var res Move
+	var p string
 	switch eventName {
 	case "myMove":
-		x, e := dat["x"].(float64)
-		fmt.Println(e)
-		y, e := dat["y"].(float64)
-		d, e := dat["direction"].(string)
-		p, e := dat["pid"].(string)
-		res = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: []MyMove{MyMove{X: int(x), Y: int(y), Direction: d, Pid: p}}}
-
+		x, _ := dat["x"].(float64)
+		y, _ := dat["y"].(float64)
+		d, _ := dat["direction"].(string)
+		p, _ = dat["pid"].(string)
+		res = Move{X: int(x), Y: int(y), Direction: d}
 	default:
 		panic("Did not understand event " + eventName)
 	}
 
 	fmt.Println("parsed message: ", res)
-	return res
+	return res, p
 }
 
 func CreateInitPlayerPosition() Move {
@@ -223,7 +226,6 @@ func leaderListener(leaderAddrString string) {
 
 	// MAIN LOOP SECTION
 	isNewRound := true
-	var responses map[string]bool
 	var roundMoves MovesMessage
 	for {
 		// if a new round is starting, let everyone connected to me know
@@ -234,26 +236,19 @@ func leaderListener(leaderAddrString string) {
 				_, err := conn.WriteToUDP(newRoundMessage, addr)
 				checkError(err)
 			}
-			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: make([]MyMove, 0)}
-			responses = make(map[string]bool)
+			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: make(map[string]Move)}}
 			isNewRound = false
 		}
 
 		// read a message from some follower
 		buf, _ := readFromUDP(conn)
-		// parse the new message into a MovesMessage struct (usually)
-		commands := parseMessage(buf)
-
-		// append moves received to list of all moves recieved for current round
-		if commands.EventName == "moves" && commands.Round == gameState.Round {
-			for _, move := range commands.Moves {
-				roundMoves.Moves = append(roundMoves.Moves, move)
-				responses[move.Pid] = true
-			}
-		}
+		// for now, assume its a move message. TODO other stuff
+		// TODO: check relevant round
+		move, pid := parseMessage(buf)
+		roundMoves.Moves.Moves[pid] = move
 
 		// end condition; reply to my followers if I have been messaged by all of them
-		if len(responses) == len(gameState.AddrToPid) {
+		if len(roundMoves.Moves.Moves) == len(gameState.AddrToPid) {
 			byt := encodeMessage(roundMoves)
 
 			// send message to all followers

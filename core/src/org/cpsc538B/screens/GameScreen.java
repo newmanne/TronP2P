@@ -110,11 +110,12 @@ public class GameScreen extends ScreenAdapter {
                 game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves
-                for (GoSender.MoveEvent moveEvent : ((GoSender.MovesEvent) event).getMoves()) {
-                    PositionAndDirection move = moveEvent.getPositionAndDirection();
-                    grid[move.getX()][move.getY()] = Integer.parseInt(moveEvent.getPid());
-                    playerPositions.put(pid, move);
-                }
+                ((GoSender.MovesEvent) event).getMoves().entrySet().forEach(entry -> {
+                    PositionAndDirection move = entry.getValue();
+                    grid[move.getX()][move.getY()] = Integer.parseInt(entry.getKey());
+                    playerPositions.put(entry.getKey(), move);
+
+                });
             } else {
                 throw new IllegalStateException();
             }
