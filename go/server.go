@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -142,11 +143,11 @@ func CreateInitPlayerPosition() Move {
 }
 
 func isJoinMessage(buf []byte) bool {
-	return string(buf) == "JOIN"
+	return strings.TrimSpace(string(buf)) == "JOIN"
 }
 
 func isStartMessage(buf []byte) bool {
-	return string(buf) == "START\n"
+	return strings.TrimSpace(string(buf)) == "START"
 }
 
 // TODO: given pid, return message event == startGame (or something), that includes
@@ -176,7 +177,7 @@ func initLobby(conn *net.UDPConn) {
 		logLeader("Waiting for a client to join or send a start game message")
 		buf, raddr := readFromUDP(conn)
 		// what type of message is it? join or start game?
-		if isJoinMessage(buf) {
+		if isJoinMessage(buf) || isStartMessage(buf) {
 			if _, knownPlayer := gameState.AddrToPid[raddr]; !knownPlayer {
 				pid := strconv.Itoa(len(gameState.Positions) + 1)
 				gameState.Positions[pid] = CreateInitPlayerPosition()
@@ -184,7 +185,9 @@ func initLobby(conn *net.UDPConn) {
 				logLeader("New player has joined from address " + raddr.String())
 				logLeader("Assigning pid " + pid + " and starting position " + strconv.Itoa(gameState.Positions[pid].X) + "," + strconv.Itoa(gameState.Positions[pid].Y))
 			}
-		} else if isStartMessage(buf) {
+		}
+
+		if isStartMessage(buf) {
 			logLeader("The game start message has been sent! Notifying all players")
 			// send message to all players to start game
 			for player, pid := range gameState.AddrToPid {
@@ -196,8 +199,8 @@ func initLobby(conn *net.UDPConn) {
 			}
 			// end lobby phase, prepare to send round messages next
 			break
-		} else {
-			panic("WTF KIND OF MESSAGE IS THIS" + string(buf))
+		} else if !isJoinMessage(buf) {
+			panic("WTF KIND OF MESSAGE IS THIS " + string(buf))
 		}
 	}
 }
@@ -232,29 +235,34 @@ func leaderListener(leaderAddrString string) {
 		if isNewRound {
 			newRoundMessage := newRoundMessage()
 			logLeader("Sending the following round start message: " + string(newRoundMessage))
-			for addr, _ := range gameState.AddrToPid {
+			for addr, pid := range gameState.AddrToPid {
 				_, err := conn.WriteToUDP(newRoundMessage, addr)
 				checkError(err)
+				logLeader("Sent round start to player " + pid)
 			}
 			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: make(map[string]Move)}}
 			isNewRound = false
+			logLeader("done sending round start messages.")
 		}
 
 		// read a message from some follower
+		logLeader("Waiting to receive message from follower...")
 		buf, _ := readFromUDP(conn)
 		// for now, assume its a move message. TODO other stuff
 		// TODO: check relevant round
 		move, pid := parseMessage(buf)
 		roundMoves.Moves.Moves[pid] = move
+		logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
 
 		// end condition; reply to my followers if I have been messaged by all of them
 		if len(roundMoves.Moves.Moves) == len(gameState.AddrToPid) {
 			byt := encodeMessage(roundMoves)
 
 			// send message to all followers
-			for addr, _ := range gameState.AddrToPid {
+			for addr, pid := range gameState.AddrToPid {
 				_, err = conn.WriteToUDP(byt, addr)
 				checkError(err)
+				logLeader("Replied with round moves to player " + pid)
 			}
 			// start a new round of communication
 			isNewRound = true
@@ -340,7 +348,7 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 	// pass message onto java side (first round start)
 	logJava("Waiting for the go message to send to java")
 	reply := <-recvChan
-	logJava("reply" + reply)
+	logJava("reply " + reply)
 	conn.Write([]byte(reply + "\n"))
 	checkError(err)
 	logJava("Wrote game start message to java. Lobby phase over, entering main loop")
