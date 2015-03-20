@@ -107,7 +107,13 @@ public class GameScreen extends ScreenAdapter {
                         provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, getPositionAndDirection().getY() + 1));
                         break;
                 }
-                game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
+
+                if (collisionWithWall(provisionalPositionAndDirection)) {
+                    game.getGoSender().sendToGo(new GoSender.DeathEvent(pid));
+                } else {
+                    game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
+                }
+
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves
                 ((GoSender.MovesEvent) event).getMoves().entrySet().forEach(entry -> {
@@ -182,6 +188,10 @@ public class GameScreen extends ScreenAdapter {
             shapeRenderer.rectLine(wallVertices[i], wallVertices[i + 1], GRID_SIZE * 2);
         }
         shapeRenderer.end();
+    }
+
+    private boolean collisionWithWall(PositionAndDirection move) {
+        return grid[move.getX()][move.getY()] != UNOCCUPIED;
     }
 
     @Override

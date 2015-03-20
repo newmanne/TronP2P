@@ -84,6 +84,7 @@ type GameStartMessage struct {
 
 var gameState GameState
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
+var COLLISION_IS_DEATH = true
 var REFRESH_RATE = 50 * time.Millisecond // number of milliseconds per refresh/round
 
 // UTILITY FUNCTIONS
@@ -148,9 +149,8 @@ func parseMessage(buf []byte) (Move, string) {
 		pid, _ = dat["pid"].(string)
 		res = Move{X: int(x), Y: int(y), Direction: d}
 	case "myDeath":
-		if gameState.Alive[pid] {
-			gameState.Alive[pid] = false
-			gameState.Finish = append(gameState.Finish, pid)
+		if COLLISION_IS_DEATH {
+			killPlayer(pid)
 		}
 		res = gameState.Positions[pid]
 	default:
@@ -177,6 +177,13 @@ func isStartMessage(buf []byte) bool {
 // all player start positions, this players pid, and their leader they refer to from now on
 func startGameMessage(pid string, startingPositions map[string]Move) GameStartMessage {
 	return GameStartMessage{EventName: "gameStart", GameStart: GameStart{Pid: pid, StartingPositions: startingPositions}}
+}
+
+func killPlayer(pid string) {
+	if gameState.Alive[pid] {
+		gameState.Alive[pid] = false
+		gameState.Finish = append(gameState.Finish, pid)
+	}
 }
 
 /*
@@ -235,16 +242,14 @@ func gameOver() bool {
 		return false
 	}
 
-	count := 0
-	for _, alive := range gameState.Alive {
-		if alive {
-			if count == 1 {
-				return false
-			}
-			count = 1
-		}
-	}
-	return true
+	// TODO: what happens if there is a tie?
+	return len(gameState.Finish) >= len(gameState.AddrToPid) - 1
+}
+
+// TODO: add timeout, assign player deaths if they didn't respond in time
+// or (also TODO) define grace period for some amount of missed moves before death
+func timeToRespond(roundMoves MovesMessage) bool {
+	return len(roundMoves.Moves.Moves) == len(gameState.AddrToPid)
 }
 
 // main leader function, approves moves of followers, TODO add leader hierarchy
@@ -290,7 +295,7 @@ func leaderListener(leaderAddrString string) {
 		logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
 
 		// end condition; reply to my followers if I have been messaged by all of them
-		if len(roundMoves.Moves.Moves) == len(gameState.AddrToPid) {
+		if timeToRespond(roundMoves) {
 			byt := encodeMessage(roundMoves)
 
 			// send message to all followers

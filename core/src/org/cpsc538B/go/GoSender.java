@@ -196,6 +196,17 @@ public class GoSender implements Disposable {
     }
 
     @Data
+    @NoArgsConstructor
+    public static class DeathEvent {
+        String eventName = "myDeath";
+
+        public DeathEvent(String pid) {
+            this.pid = pid;
+        }
+        String pid;
+    }
+
+    @Data
     public static class MovesEvent {
         Map<String, PositionAndDirection> moves;
     }
