@@ -35,6 +35,8 @@ type GameState struct {
 	GridWidth  int
 	GridHeight int
 	Positions  map[string]Move
+	Alive      map[string]bool
+	Finish     []string
 	AddrToPid  map[*net.UDPAddr]string
 }
 
@@ -51,6 +53,11 @@ type MyMoveMessage struct {
 	EventName string `json:"eventName"`
 	Round     int    `json:"round"`
 	MyMove    `json:"myMove"`
+}
+
+type MyDeathMessage struct {
+	EventName string `json:"eventName"`
+	Round     int    `json:"round"`
 }
 
 type MovesMessage struct {
@@ -76,8 +83,18 @@ type GameStartMessage struct {
 // GLOBAL VARS
 
 var gameState GameState
+var DISABLE_GAME_OVER = true // to allow single player game for debugging
+var REFRESH_RATE = 50 * time.Millisecond // number of milliseconds per refresh/round
 
 // UTILITY FUNCTIONS
+
+func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
+	buf := make([]byte, 4096)
+	_, raddr, err := conn.ReadFromUDP(buf)
+	buf = bytes.Trim(buf, "\x00")
+	checkError(err)
+	return buf, raddr
+}
 
 func randomInt(min, max int) int {
 	return rand.Intn(max-min) + min
@@ -122,20 +139,26 @@ func parseMessage(buf []byte) (Move, string) {
 	// TODO: error handling, default actions
 	eventName := dat["eventName"].(string)
 	var res Move
-	var p string
+	var pid string
 	switch eventName {
 	case "myMove":
 		x, _ := dat["x"].(float64)
 		y, _ := dat["y"].(float64)
 		d, _ := dat["direction"].(string)
-		p, _ = dat["pid"].(string)
+		pid, _ = dat["pid"].(string)
 		res = Move{X: int(x), Y: int(y), Direction: d}
+	case "myDeath":
+		if gameState.Alive[pid] {
+			gameState.Alive[pid] = false
+			gameState.Finish = append(gameState.Finish, pid)
+		}
+		res = gameState.Positions[pid]
 	default:
 		panic("Did not understand event " + eventName)
 	}
 
 	fmt.Println("parsed message: ", res)
-	return res, p
+	return res, pid
 }
 
 func CreateInitPlayerPosition() Move {
@@ -205,14 +228,26 @@ func initLobby(conn *net.UDPConn) {
 	}
 }
 
-func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
-	buf := make([]byte, 4096)
-	_, raddr, err := conn.ReadFromUDP(buf)
-	buf = bytes.Trim(buf, "\x00")
-	checkError(err)
-	return buf, raddr
+// determines if game is over (all players are dead except one)
+func gameOver() bool {
+
+	if DISABLE_GAME_OVER {
+		return false
+	}
+
+	count := 0
+	for _, alive := range gameState.Alive {
+		if alive {
+			if count == 1 {
+				return false
+			}
+			count = 1
+		}
+	}
+	return true
 }
 
+// main leader function, approves moves of followers, TODO add leader hierarchy
 func leaderListener(leaderAddrString string) {
 	// Listen
 	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
@@ -227,10 +262,10 @@ func leaderListener(leaderAddrString string) {
 	// this will tell me who I need to send roundStarts to.
 	initLobby(conn)
 
-	// MAIN LOOP SECTION
+	// MAIN GAME LOOP
 	isNewRound := true
 	var roundMoves MovesMessage
-	for {
+	for !gameOver() {
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
 			newRoundMessage := newRoundMessage()
@@ -268,6 +303,8 @@ func leaderListener(leaderAddrString string) {
 			isNewRound = true
 		}
 	}
+
+	// TODO END GAME SCREEN (RESULTS)
 }
 
 func goClient(sendChan chan string, recvChan chan string, leaderAddrString string, wg sync.WaitGroup, isLeader bool) {
@@ -303,7 +340,8 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	recvChan <- string(buf)
 
 	logClient("LOBBY PHASE IS OVER. ENTERING MAIN LOOP")
-	for {
+	// MAIN GAME LOOP
+	for !gameOver() {
 		// read round start from leader
 		buf, _ = readFromUDP(conn)
 		logClient("Got round start message from leader, passing it to java")
@@ -324,6 +362,8 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 		// write back to channel with byte response
 		recvChan <- string(buf)
 	}
+
+	// TODO END GAME SCREEN (RESULTS)
 }
 
 func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString string, wg sync.WaitGroup, isLeader bool) {
@@ -353,7 +393,8 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 	checkError(err)
 	logJava("Wrote game start message to java. Lobby phase over, entering main loop")
 
-	for {
+	// MAIN LOOP
+	for !gameOver() {
 		// read round start message from channel and send it to java
 		logJava("Waiting for round start message from go client")
 		roundStartMessage := <-recvChan
@@ -363,9 +404,9 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		logJava("Round start message sent to java")
 
 		// read some reply from the java game (update of move, or death)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(REFRESH_RATE)
 		status, err := connBuf.ReadString('\n')
-		logJava("Recevied: " + status)
+		logJava("Received: " + status)
 		checkError(err)
 
 		// send buf to leader channel
@@ -379,6 +420,7 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		checkError(err)
 	}
 
+	// TODO END GAME SCREEN (RESULTS)
 }
 
 func main() {
@@ -404,6 +446,7 @@ func main() {
 	gameState.GridWidth = gridWidth
 	gameState.GridHeight = gridHeight
 	gameState.Positions = make(map[string]Move)
+	gameState.Alive = make(map[string]bool)
 	gameState.AddrToPid = make(map[*net.UDPAddr]string)
 	sendChan, recvChan := make(chan string, 1), make(chan string, 1)
 
