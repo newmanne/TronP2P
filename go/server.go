@@ -98,10 +98,10 @@ type GameOverMessage struct {
 var gameState GameState
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var JAVA_REPLY_TIME = 50 * time.Millisecond          // time between every new java move
-var FOLLOWER_RESPONSE_TIME = 1000 * time.Millisecond // time for followers to respond
-var MAX_GRACE_PERIOD = 5                             // max number of consecutive missed messages
-var FOLLOWER_RESPONSE_FAIL_RATE = 0                  // out of 1000, fail rate for responses not to be received
+var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond // time for followers to respond
+var MAX_GRACE_PERIOD = 3                            // max number of consecutive missed messages
+var FOLLOWER_RESPONSE_FAIL_RATE = 0                 // out of 1000, fail rate for responses not to be received
 
 // UTILITY FUNCTIONS
 
@@ -551,7 +551,7 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		}
 
 		// read some reply from the java game (update of move, or death)
-		time.Sleep(JAVA_REPLY_TIME)
+		time.Sleep(MIN_GAME_SPEED)
 		status, err := connBuf.ReadString('\n')
 		logJava("Received: " + status)
 		checkError(err)
