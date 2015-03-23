@@ -5,8 +5,11 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import lombok.Getter;
+import lombok.Setter;
 import org.cpsc538B.go.GoSender;
 import org.cpsc538B.screens.StartScreen;
+
+import java.util.Map;
 
 public class TronP2PGame extends Game {
 
@@ -20,6 +23,9 @@ public class TronP2PGame extends Game {
     private StartScreen startScreen;
     @Getter
     private GoSender goSender;
+    @Getter
+    @Setter
+    private Map<String, String> nicknames;
 
     public final static String LOG_TAG = "TRON";
     public final static String SERVER_TAG = "SERVER";

@@ -35,11 +35,17 @@ public class GoSender implements Disposable {
     private ServerSocket serverSocket;
     private Socket goSocket;
     private int goPort;
-    final ImmutableMap<String, Class<?>> nameToEvent = ImmutableMap.of("roundStart", RoundStartEvent.class, "myMove", MoveEvent.class, "moves", MovesEvent.class, "gameStart", GameStartEvent.class);
+    final ImmutableMap<String, Class<?>> nameToEvent = ImmutableMap.<String, Class<?>>builder()
+            .put("roundStart", RoundStartEvent.class)
+            .put("myMove", MoveEvent.class)
+            .put("moves", MovesEvent.class)
+            .put("gameStart", GameStartEvent.class)
+            .put("gameOver", GameOverEvent.class)
+            .build();
     private BufferedReader goInputStream;
     private PrintWriter goOutputStream;
 
-    public void init(final String masterAddress, final boolean leader, GoInitializedCallback callback) {
+    public void init(final String masterAddress, final String nickname, final boolean leader, GoInitializedCallback callback) {
         // spawn server
         try {
             serverSocket = new ServerSocket(0);
@@ -54,7 +60,7 @@ public class GoSender implements Disposable {
         new Thread(() -> {
             try {
                 Runtime r = Runtime.getRuntime();
-                final ProcessBuilder processBuilder = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader), Integer.toString(GameScreen.GRID_WIDTH), Integer.toString(GameScreen.GRID_HEIGHT));
+                final ProcessBuilder processBuilder = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader), Integer.toString(GameScreen.GRID_WIDTH), Integer.toString(GameScreen.GRID_HEIGHT), nickname);
                 Gdx.app.log(TronP2PGame.LOG_TAG, "Running the following command:" + System.lineSeparator() + processBuilder.command() + System.lineSeparator());
                 goProcess = processBuilder.start();
 
@@ -101,7 +107,7 @@ public class GoSender implements Disposable {
                     // special case if a game start event is received
                     if (event instanceof GameStartEvent) {
                         GameStartEvent gameStartEvent = (GameStartEvent) event;
-                        callback.onGameStarted(gameStartEvent.getPid(), gameStartEvent.getStartingPositions());
+                        callback.onGameStarted(gameStartEvent.getPid(), gameStartEvent.getStartingPositions(), gameStartEvent.getNicknames());
                     } else {
                         goEvents.add(event);
                     }
@@ -168,6 +174,7 @@ public class GoSender implements Disposable {
     public static class GameStartEvent {
         String pid;
         Map<String, PositionAndDirection> startingPositions;
+        Map<String, String> nicknames;
     }
 
 
@@ -212,7 +219,12 @@ public class GoSender implements Disposable {
     }
 
     public interface GoInitializedCallback {
-        void onGameStarted(String pid, Map<String, PositionAndDirection> startingPositions);
+        void onGameStarted(String pid, Map<String, PositionAndDirection> startingPositions, Map<String, String> nicknames);
     }
 
+    @Data
+    @NoArgsConstructor
+    public static class GameOverEvent {
+        List<String> pidsInOrderOfDeath;
+    }
 }

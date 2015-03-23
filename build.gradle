@@ -57,6 +57,7 @@ project(":core") {
         compile "com.fasterxml.jackson.core:jackson-core:$jacksonVersion"
         compile "com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion"
         compile "com.fasterxml.jackson.datatype:jackson-datatype-guava:$jacksonVersion"
+        compile 'org.apache.commons:commons-lang3:3.3.2'
     }
 }
 

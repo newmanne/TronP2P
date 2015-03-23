@@ -11,12 +11,15 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
+import com.google.common.collect.ImmutableList;
+import org.apache.commons.lang3.RandomUtils;
 import org.cpsc538B.go.GoSender;
 import org.cpsc538B.model.Direction;
 import org.cpsc538B.model.PositionAndDirection;
 import org.cpsc538B.TronP2PGame;
 import org.cpsc538B.utils.GameUtils;
 
+import java.util.List;
 import java.util.Map;
 
 
@@ -36,17 +39,23 @@ public class StartScreen extends ScreenAdapter {
     private boolean readyToGo = false;
     private String pid;
     private Map<String, PositionAndDirection> startingPositions;
+    final List<String> sampleNames = ImmutableList.of("Blinky", "Pacman", "Robocop", "DemonSlayer", "HAL", "ChickenLittle", "HansSolo", "Yoshi", "EcologyFan", "Ghost", "GoLeafsGo", "Batman");
+
+
 
     public StartScreen(TronP2PGame game) {
         this.game = game;
         stage = new Stage(new StretchViewport(GameScreen.V_WIDTH, GameScreen.V_HEIGHT), game.getSpritebatch());
         rootTable = new Table();
         rootTable.setFillParent(true);
+        rootTable.defaults().pad(10f);
         stage.addActor(rootTable);
 
         // stuff
         Label logo = new Label(TRON, game.getAssets().getLargeLabelStyle());
         final TextField leaderIpField = new TextField(DEFAULT_IP, game.getAssets().getTextFieldStyle());
+        final String defaultName = sampleNames.get(RandomUtils.nextInt(0, sampleNames.size()));
+        final TextField nameField = new TextField(defaultName, game.getAssets().getTextFieldStyle());
 
         final TextButton startAGame = new TextButton(START_A_GAME, game.getAssets().getTextButtonStyle());
         final TextButton joinAGame = new TextButton(JOIN_A_GAME, game.getAssets().getTextButtonStyle());
@@ -57,10 +66,11 @@ public class StartScreen extends ScreenAdapter {
         createAGame.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), true, (pid1, startingPositions1) -> {
+                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), nameField.getText(), true, (pid1, startingPositions1, nicknames) -> {
                     // need the actual switch to happpen on the thread in the render loop unfortunately
                     StartScreen.this.pid = pid1;
                     StartScreen.this.startingPositions = startingPositions1;
+                    game.setNicknames(nicknames);
                     StartScreen.this.readyToGo = true;
                 });
                 joinAGame.setDisabled(true);
@@ -80,10 +90,11 @@ public class StartScreen extends ScreenAdapter {
         joinAGame.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), false, (pid1, startingPositions1) -> {
+                StartScreen.this.game.getGoSender().init(leaderIpField.getText(), nameField.getText(), false, (pid1, startingPositions1, nicknames) -> {
                     // need the actual switch to happpen on the thread in the render loop unfortunately
                     StartScreen.this.pid = pid1;
                     StartScreen.this.startingPositions = startingPositions1;
+                    game.setNicknames(nicknames);
                     StartScreen.this.readyToGo = true;
                 });
                 joinAGame.setDisabled(true);
@@ -94,15 +105,19 @@ public class StartScreen extends ScreenAdapter {
         });
 
         // menu positioning
-        rootTable.add(logo);
+        rootTable.add(logo).colspan(2);
         rootTable.row();
-        rootTable.add(leaderIpField).fill();
+        rootTable.add(new Label("Leader IP:PORT", game.getAssets().getLabelStyle()));
+        rootTable.add(leaderIpField).width(800);
         rootTable.row();
-        rootTable.add(createAGame);
+        rootTable.add(new Label("Nickname", game.getAssets().getLabelStyle()));
+        rootTable.add(nameField).width(800);
         rootTable.row();
-        rootTable.add(joinAGame);
+        rootTable.add(createAGame).colspan(2);
         rootTable.row();
-        rootTable.add(startAGame);
+        rootTable.add(joinAGame).colspan(2);
+        rootTable.row();
+        rootTable.add(startAGame).colspan(2);
     }
 
     @Override
