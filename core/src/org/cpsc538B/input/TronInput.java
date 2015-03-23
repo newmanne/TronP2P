@@ -21,16 +21,24 @@ public class TronInput extends InputAdapter {
     public boolean keyDown(int keycode) {
         switch (keycode) {
             case Input.Keys.LEFT:
-                provisionalDirection = Direction.LEFT;
+                if (!provisionalDirection.equals(Direction.RIGHT)) {
+                    provisionalDirection = Direction.LEFT;
+                }
                 break;
             case Input.Keys.RIGHT:
-                provisionalDirection = Direction.RIGHT;
+                if (!provisionalDirection.equals(Direction.LEFT)) {
+                    provisionalDirection = Direction.RIGHT;
+                }
                 break;
             case Input.Keys.UP:
-                provisionalDirection = Direction.UP;
+                if (!provisionalDirection.equals(Direction.DOWN)) {
+                    provisionalDirection = Direction.UP;
+                }
                 break;
             case Input.Keys.DOWN:
-                provisionalDirection = Direction.DOWN;
+                if (!provisionalDirection.equals(Direction.UP)) {
+                    provisionalDirection = Direction.DOWN;
+                }
                 break;
         }
         return true;

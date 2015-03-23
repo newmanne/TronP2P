@@ -30,16 +30,17 @@ type Move struct {
 }
 
 type GameState struct {
-	Round      int
-	MyPid      int
-	GridWidth  int
-	GridHeight int
-	Positions  map[string]Move
-	Alive      map[string]bool
-	Grace      map[string]int
-	Finish     []string
-	AddrToPid  map[*net.UDPAddr]string
-	PidToNickname map[string]string
+	Round          int
+	MyPid          int
+	GridWidth      int
+	GridHeight     int
+	Positions      map[string]Move
+	Alive          map[string]bool
+	Grace          map[string]int
+	Finish         []string
+	AddrToPid      map[*net.UDPAddr]string
+	PidToNickname  map[string]string
+	DroppedForever map[string]bool
 }
 
 type RoundStart struct {
@@ -96,13 +97,31 @@ type GameOverMessage struct {
 
 var gameState GameState
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
-var COLLISION_IS_DEATH = false
-var JAVA_REPLY_TIME = 50 * time.Millisecond // time between every new java move
-var FOLLOWER_RESPONSE_TIME = 25 * time.Millisecond // time for followers to respond
-var MAX_GRACE_PERIOD = 100 // max number of consecutive missed messages
-var FOLLOWER_RESPONSE_FAIL_RATE = 0 // out of 1000, fail rate for responses not to be received
+var COLLISION_IS_DEATH = true
+var JAVA_REPLY_TIME = 50 * time.Millisecond          // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 1000 * time.Millisecond // time for followers to respond
+var MAX_GRACE_PERIOD = 5                             // max number of consecutive missed messages
+var FOLLOWER_RESPONSE_FAIL_RATE = 0                  // out of 1000, fail rate for responses not to be received
 
 // UTILITY FUNCTIONS
+
+func readFromUDPWithTimeout(conn *net.UDPConn, timeout time.Duration) ([]byte, *net.UDPAddr, bool) {
+	buf := make([]byte, 4096)
+	conn.SetReadDeadline(time.Now().Add(timeout))
+	_, raddr, err := conn.ReadFromUDP(buf)
+	if err != nil {
+		if e, ok := err.(net.Error); !ok || !e.Timeout() {
+			checkError(err)
+			return nil, nil, false
+		} else {
+			// timeout
+			return nil, raddr, true
+		}
+	} else {
+		buf = bytes.Trim(buf, "\x00")
+		return buf, raddr, false
+	}
+}
 
 func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
 	buf := make([]byte, 4096)
@@ -173,7 +192,7 @@ func parseMessage(buf []byte) (Move, string) {
 		panic("Did not understand event " + eventName)
 	}
 
-	fmt.Println("parsed message: ", res)
+	logLeader("parsed message: " + string(encodeMessage(res)))
 	return res, pid
 }
 
@@ -284,19 +303,23 @@ func resetGracePeriod(pid string) {
 }
 
 func countGracePeriod(pid string) {
-	gameState.Grace[pid] += 1
-	logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
+	if !gameState.DroppedForever[pid] {
+		gameState.Grace[pid] += 1
+		logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
 
-	if gameState.Grace[pid] >= MAX_GRACE_PERIOD {
-		killPlayer(pid)
+		if gameState.Grace[pid] >= MAX_GRACE_PERIOD {
+			killPlayer(pid)
+			gameState.DroppedForever[pid] = true
+		}
 	}
 }
 
 // if pid did not respond, their next move is to continue in next direction one move in advance
 func addContinuedMove(moves MovesMessage, pid string) {
 	nextMove := gameState.Positions[pid]
-	
+
 	switch nextMove.Direction {
+	// TODO: add maxs and mins
 	case "UP":
 		nextMove.Y = nextMove.Y - 1
 	case "DOWN":
@@ -322,13 +345,12 @@ func surviveFollowerResponseInjectedFailure() bool {
 // determines if leader can respond to followers yet
 func timeToRespond(moves MovesMessage, timedout bool) bool {
 	recvCount := len(moves.Moves.Moves)
-	totalNeeded := len(gameState.AddrToPid)
+	totalNeeded := len(gameState.AddrToPid) - len(gameState.DroppedForever)
 	logLeader("received " + strconv.Itoa(recvCount) + "/" + strconv.Itoa(totalNeeded) + " messages")
 
 	if recvCount == totalNeeded || timedout {
 		// count missed messages for those who did not respond, or reset
 		for pid, alive := range gameState.Alive {
-			logLeader("#### in for loop #####")
 			_, responded := moves.Moves.Moves[pid]
 			if responded {
 				resetGracePeriod(pid)
@@ -337,7 +359,7 @@ func timeToRespond(moves MovesMessage, timedout bool) bool {
 				// don't move them if they are dead
 				if alive {
 					addContinuedMove(moves, pid)
-				}		
+				}
 			}
 		}
 		return true
@@ -371,9 +393,6 @@ func leaderListener(leaderAddrString string) {
 	initLobby(conn)
 
 	// MAIN GAME LOOP
-	recvChan := make(chan bool, 1)
-
-	timedout := false
 	isNewRound := true
 	var roundMoves MovesMessage
 	for {
@@ -382,37 +401,31 @@ func leaderListener(leaderAddrString string) {
 			newRoundMessage := newRoundMessage()
 			leaderBroadcast(conn, newRoundMessage)
 			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: make(map[string]Move)}}
-			timedout = false
 			isNewRound = false
 			logLeader("done sending round start messages.")
 		}
 
-
 		// read messages from followers and forward them
 		logLeader("Waiting to receive message from follower...")
-		buf, _ := readFromUDP(conn)
+		// TODO: actualy the delta of how much time we have left to wait
+		buf, _, timedout := readFromUDPWithTimeout(conn, FOLLOWER_RESPONSE_TIME)
 
 		// TODO: check relevant round
-		move, pid := parseMessage(buf)
-		if gameOver() {
-			break
-		}
-		// artifical missed response for testing
-		received := surviveFollowerResponseInjectedFailure()
-		if received {
-			roundMoves.Moves.Moves[pid] = move
-			recvChan <- true
-		}
-
-		// block until timeout or response received
-		logLeader("Waiting for timeout or message...")
-		select {
-		case <- recvChan:
+		if !timedout {
+			move, pid := parseMessage(buf)
+			// artifical missed response for testing
+			received := surviveFollowerResponseInjectedFailure()
+			if received {
+				roundMoves.Moves.Moves[pid] = move
+			}
 			logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
 
-		case <- time.After(FOLLOWER_RESPONSE_TIME):
-			logLeader("received timeout")
-			timedout = true
+		} else {
+			logLeader("Timed out")
+
+		}
+		if gameOver() {
+			break
 		}
 
 		// end condition; reply to my followers if I have been messaged by all of them
@@ -583,6 +596,7 @@ func main() {
 	gameState.Grace = make(map[string]int)
 	gameState.AddrToPid = make(map[*net.UDPAddr]string)
 	gameState.PidToNickname = make(map[string]string)
+	gameState.DroppedForever = make(map[string]bool)
 	sendChan, recvChan := make(chan string, 1), make(chan string, 1)
 
 	// if I am the leader, listen for rounds to confirm them
