@@ -85,10 +85,11 @@ type GameStartMessage struct {
 
 var gameState GameState
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
-var COLLISION_IS_DEATH = true
+var COLLISION_IS_DEATH = false
 var JAVA_REPLY_TIME = 50 * time.Millisecond // time between every new java move
 var FOLLOWER_RESPONSE_TIME = 25 * time.Millisecond // time for followers to respond
 var MAX_GRACE_PERIOD = 100 // max number of consecutive missed messages
+var FOLLOWER_RESPONSE_FAIL_RATE = 0 // out of 1000, fail rate for responses not to be received
 
 // UTILITY FUNCTIONS
 
@@ -184,6 +185,7 @@ func startGameMessage(pid string, startingPositions map[string]Move) GameStartMe
 
 func killPlayer(pid string) {
 	if gameState.Alive[pid] {
+		logLeader("killing player " + pid)
 		gameState.Alive[pid] = false
 		gameState.Finish = append(gameState.Finish, pid)
 	}
@@ -196,7 +198,7 @@ func killPlayer(pid string) {
  3) all players acknowledge game begins?
 
  General structure:
- - monarch sarts lobby session
+ - monarch starts lobby session
  - monarch is pid=1
  - as players join, they are assigned pid in order of arrival
  - monarch closes lobby with start game command
@@ -214,6 +216,7 @@ func initLobby(conn *net.UDPConn) {
 			if _, knownPlayer := gameState.AddrToPid[raddr]; !knownPlayer {
 				pid := strconv.Itoa(len(gameState.Positions) + 1)
 				gameState.Positions[pid] = CreateInitPlayerPosition()
+				gameState.Alive[pid] = true
 				gameState.AddrToPid[raddr] = pid
 				logLeader("New player has joined from address " + raddr.String())
 				logLeader("Assigning pid " + pid + " and starting position " + strconv.Itoa(gameState.Positions[pid].X) + "," + strconv.Itoa(gameState.Positions[pid].Y))
@@ -251,10 +254,13 @@ func gameOver() bool {
 
 func resetGracePeriod(pid string) {
 	gameState.Grace[pid] = 0
+	logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
 }
 
 func countGracePeriod(pid string) {
 	gameState.Grace[pid] += 1
+	logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
+
 	if gameState.Grace[pid] >= MAX_GRACE_PERIOD {
 		killPlayer(pid)
 	}
@@ -277,9 +283,14 @@ func addContinuedMove(moves MovesMessage, pid string) {
 		panic("Next move direction unknown")
 	}
 
-	if _, ok := moves.Moves.Moves[pid]; !ok {
-		moves.Moves.Moves[pid] = nextMove
-	}
+	moves.Moves.Moves[pid] = nextMove
+}
+
+// to simulate missed responses; some of the time we will miss follower responses
+// and resort to timeout; this is one of those times
+func surviveFollowerResponseInjectedFailure() bool {
+	p := randomInt(0, 1000)
+	return p >= FOLLOWER_RESPONSE_FAIL_RATE
 }
 
 // determines if leader can respond to followers yet
@@ -290,14 +301,15 @@ func timeToRespond(moves MovesMessage, timedout bool) bool {
 
 	if recvCount == totalNeeded || timedout {
 		// count missed messages for those who did not respond, or reset
-		for pid := range gameState.Alive {
+		for pid, alive := range gameState.Alive {
+			logLeader("#### in for loop #####")
 			_, responded := moves.Moves.Moves[pid]
-			if responded{
+			if responded {
 				resetGracePeriod(pid)
 			} else {
 				countGracePeriod(pid)
 				// don't move them if they are dead
-				if gameState.Alive[pid] {
+				if alive {
 					addContinuedMove(moves, pid)
 				}		
 			}
@@ -324,11 +336,10 @@ func leaderListener(leaderAddrString string) {
 	initLobby(conn)
 
 	// MAIN GAME LOOP
-	recvChan := make(chan string, 1)
+	recvChan := make(chan bool, 1)
 
 	timedout := false
 	isNewRound := true
-	listenerActive := false
 	var roundMoves MovesMessage
 
 	for !gameOver() {
@@ -347,29 +358,30 @@ func leaderListener(leaderAddrString string) {
 			logLeader("done sending round start messages.")
 		}
 
+
 		// read messages from followers and forward them
-		if !listenerActive {
-			go func(moves MovesMessage) {
-				logLeader("Waiting to receive message from follower...")
-				buf, _ := readFromUDP(conn)
+		logLeader("Waiting to receive message from follower...")
+		buf, _ := readFromUDP(conn)
 
-				// TODO: check relevant round
-				move, pid := parseMessage(buf)
-				moves.Moves.Moves[pid] = move
+		// TODO: check relevant round
+		move, pid := parseMessage(buf)
 
-				recvChan <- ("Received move message " + string(encodeMessage(move)) + " from player " + pid)
-			}(roundMoves)
-			listenerActive = true
+		// artifical missed response for testing
+		received := surviveFollowerResponseInjectedFailure()
+		if received {
+			roundMoves.Moves.Moves[pid] = move
+			recvChan <- true
 		}
 
 		// block until timeout or response received
 		logLeader("Waiting for timeout or message...")
 		select {
-		case logMsg := <- recvChan:
-			logLeader(logMsg)
-			listenerActive = false
+		case <- recvChan:
+			logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
+
 		case <- time.After(FOLLOWER_RESPONSE_TIME):
 			logLeader("received timeout")
+			timedout = true
 		}
 
 		// end condition; reply to my followers if I have been messaged by all of them
