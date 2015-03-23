@@ -1,0 +1,15 @@
+Here's a list of features we need to implement in the coming weeks:
+
+simple(?) stuff:
+- handle socket disconnection without fatal error in Go (assign player death instead)
+- game over screen, list player finishing order to screen (easy)
+
+harder stuff:
+- implement grace period of missed moves before killing player (do we want to do this?)
+- implement leader hierarchy with super leaders etc.
+- handle leader failure (introduce leader leases or something)
+- nail down evaluation method (how good is our thing?)
+
+nice to have:
+- better GUI?
+- music?

@@ -36,6 +36,7 @@ type GameState struct {
 	GridHeight int
 	Positions  map[string]Move
 	Alive      map[string]bool
+	Grace      map[string]int
 	Finish     []string
 	AddrToPid  map[*net.UDPAddr]string
 }
@@ -85,7 +86,9 @@ type GameStartMessage struct {
 var gameState GameState
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var REFRESH_RATE = 50 * time.Millisecond // number of milliseconds per refresh/round
+var JAVA_REPLY_TIME = 50 * time.Millisecond // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 25 * time.Millisecond // time for followers to respond
+var MAX_GRACE_PERIOD = 100 // max number of consecutive missed messages
 
 // UTILITY FUNCTIONS
 
@@ -246,10 +249,63 @@ func gameOver() bool {
 	return len(gameState.Finish) >= len(gameState.AddrToPid) - 1
 }
 
-// TODO: add timeout, assign player deaths if they didn't respond in time
-// or (also TODO) define grace period for some amount of missed moves before death
-func timeToRespond(roundMoves MovesMessage) bool {
-	return len(roundMoves.Moves.Moves) == len(gameState.AddrToPid)
+func resetGracePeriod(pid string) {
+	gameState.Grace[pid] = 0
+}
+
+func countGracePeriod(pid string) {
+	gameState.Grace[pid] += 1
+	if gameState.Grace[pid] >= MAX_GRACE_PERIOD {
+		killPlayer(pid)
+	}
+}
+
+// if pid did not respond, their next move is to continue in next direction one move in advance
+func addContinuedMove(moves MovesMessage, pid string) {
+	nextMove := gameState.Positions[pid]
+	
+	switch nextMove.Direction {
+	case "UP":
+		nextMove.Y = nextMove.Y - 1
+	case "DOWN":
+		nextMove.Y = nextMove.Y + 1
+	case "LEFT":
+		nextMove.X = nextMove.X - 1
+	case "RIGHT":
+		nextMove.X = nextMove.X + 1
+	default:
+		panic("Next move direction unknown")
+	}
+
+	if _, ok := moves.Moves.Moves[pid]; !ok {
+		moves.Moves.Moves[pid] = nextMove
+	}
+}
+
+// determines if leader can respond to followers yet
+func timeToRespond(moves MovesMessage, timedout bool) bool {
+	recvCount := len(moves.Moves.Moves)
+	totalNeeded := len(gameState.AddrToPid)
+	logLeader("received " + strconv.Itoa(recvCount) + "/" + strconv.Itoa(totalNeeded) + " messages")
+
+	if recvCount == totalNeeded || timedout {
+		// count missed messages for those who did not respond, or reset
+		for pid := range gameState.Alive {
+			_, responded := moves.Moves.Moves[pid]
+			if responded{
+				resetGracePeriod(pid)
+			} else {
+				countGracePeriod(pid)
+				// don't move them if they are dead
+				if gameState.Alive[pid] {
+					addContinuedMove(moves, pid)
+				}		
+			}
+		}
+		return true
+	} else {
+		return false
+	}
 }
 
 // main leader function, approves moves of followers, TODO add leader hierarchy
@@ -268,8 +324,13 @@ func leaderListener(leaderAddrString string) {
 	initLobby(conn)
 
 	// MAIN GAME LOOP
+	recvChan := make(chan string, 1)
+
+	timedout := false
 	isNewRound := true
+	listenerActive := false
 	var roundMoves MovesMessage
+
 	for !gameOver() {
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
@@ -281,21 +342,38 @@ func leaderListener(leaderAddrString string) {
 				logLeader("Sent round start to player " + pid)
 			}
 			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: make(map[string]Move)}}
+			timedout = false
 			isNewRound = false
 			logLeader("done sending round start messages.")
 		}
 
-		// read a message from some follower
-		logLeader("Waiting to receive message from follower...")
-		buf, _ := readFromUDP(conn)
-		// for now, assume its a move message. TODO other stuff
-		// TODO: check relevant round
-		move, pid := parseMessage(buf)
-		roundMoves.Moves.Moves[pid] = move
-		logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
+		// read messages from followers and forward them
+		if !listenerActive {
+			go func(moves MovesMessage) {
+				logLeader("Waiting to receive message from follower...")
+				buf, _ := readFromUDP(conn)
+
+				// TODO: check relevant round
+				move, pid := parseMessage(buf)
+				moves.Moves.Moves[pid] = move
+
+				recvChan <- ("Received move message " + string(encodeMessage(move)) + " from player " + pid)
+			}(roundMoves)
+			listenerActive = true
+		}
+
+		// block until timeout or response received
+		logLeader("Waiting for timeout or message...")
+		select {
+		case logMsg := <- recvChan:
+			logLeader(logMsg)
+			listenerActive = false
+		case <- time.After(FOLLOWER_RESPONSE_TIME):
+			logLeader("received timeout")
+		}
 
 		// end condition; reply to my followers if I have been messaged by all of them
-		if timeToRespond(roundMoves) {
+		if timeToRespond(roundMoves, timedout) {
 			byt := encodeMessage(roundMoves)
 
 			// send message to all followers
@@ -409,7 +487,7 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		logJava("Round start message sent to java")
 
 		// read some reply from the java game (update of move, or death)
-		time.Sleep(REFRESH_RATE)
+		time.Sleep(JAVA_REPLY_TIME)
 		status, err := connBuf.ReadString('\n')
 		logJava("Received: " + status)
 		checkError(err)
@@ -452,6 +530,7 @@ func main() {
 	gameState.GridHeight = gridHeight
 	gameState.Positions = make(map[string]Move)
 	gameState.Alive = make(map[string]bool)
+	gameState.Grace = make(map[string]int)
 	gameState.AddrToPid = make(map[*net.UDPAddr]string)
 	sendChan, recvChan := make(chan string, 1), make(chan string, 1)
 
