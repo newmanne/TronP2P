@@ -200,6 +200,7 @@ public class GoSender implements Disposable {
         }
 
         String pid;
+        int round;
     }
 
     @Data
@@ -211,6 +212,7 @@ public class GoSender implements Disposable {
             this.pid = pid;
         }
         String pid;
+        int round;
     }
 
     @Data

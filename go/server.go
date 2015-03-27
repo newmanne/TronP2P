@@ -179,18 +179,18 @@ func newRoundMessage() []byte {
 	return encodeMessage(message)
 }
 
-func parseMessage(buf []byte) (Move, string) {
+func parseMessage(buf []byte) (Move, string, int) {
 	fmt.Println("Parsing the following message " + string(buf))
 	var dat map[string]interface{}
 	err := json.Unmarshal(buf, &dat)
 	checkError(err)
 
 	fmt.Println("dat: ", dat)
-
-	// TODO: error handling, default actions
+	roundString, _ := dat["round"]
+	round := int(roundString)
 	eventName := dat["eventName"].(string)
-	var res Move
 	pid, _ := dat["pid"].(string)
+	var res Move
 	switch eventName {
 	case "myMove":
 		x, _ := dat["x"].(float64)
@@ -209,7 +209,7 @@ func parseMessage(buf []byte) (Move, string) {
 	}
 
 	logLeader("parsed message: " + string(encodeMessage(res)))
-	return res, pid
+	return res, pid, round
 }
 
 func CreateInitPlayerPosition() Move {
@@ -391,7 +391,7 @@ func leaderBroadcast(conn *net.UDPConn, message []byte) {
 	}
 }
 
-// main leader function, approves moves of followers, TODO add leader hierarchy
+// main leader function, approves moves of followers
 func leaderListener(leaderAddrString string) {
 	// Listen
 	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
@@ -425,16 +425,18 @@ func leaderListener(leaderAddrString string) {
 		logLeader("Waiting to receive message from follower...")
 		buf, _, timedout := readFromUDPWithTimeout(conn, timeoutTimeForRound)
 
-		// TODO: check relevant round
 		if !timedout {
-			move, pid := parseMessage(buf)
-			// artifical missed response for testing
-			received := surviveFollowerResponseInjectedFailure()
-			if received {
-				roundMoves.Moves.Moves[pid] = move
+			move, pid, round := parseMessage(buf)
+			if round == gameState.Round {
+				// artifical missed response for testing
+				received := surviveFollowerResponseInjectedFailure()
+				if received {
+					roundMoves.Moves.Moves[pid] = move
+				}
+				logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
+			} else {
+				logLeader("Recieved a move message from " + pid + " from an old round " + strconv.Itoa(round) + " but current round is " + strconv.Itoa(gameState.Round) + ". Ignoring message")
 			}
-			logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
-
 		} else {
 			logLeader("Timed out")
 		}
@@ -569,10 +571,8 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		// send buf to leader channel
 		sendChan <- status
 
-		// read reply (timeToReply?) from leader (TODO: use a select w/ timeout?)
 		reply := <-recvChan
 
-		// TODO: only write back after receiving multiple replies, or after ticker timeout
 		conn.Write([]byte(reply + "\n"))
 		checkError(err)
 	}
