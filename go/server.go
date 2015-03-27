@@ -105,9 +105,9 @@ var FOLLOWER_RESPONSE_FAIL_RATE = 0                 // out of 1000, fail rate fo
 
 // UTILITY FUNCTIONS
 
-func readFromUDPWithTimeout(conn *net.UDPConn, timeout time.Duration) ([]byte, *net.UDPAddr, bool) {
+func readFromUDPWithTimeout(conn *net.UDPConn, timeoutTime time.Time) ([]byte, *net.UDPAddr, bool) {
 	buf := make([]byte, 4096)
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	conn.SetReadDeadline(timeoutTime)
 	_, raddr, err := conn.ReadFromUDP(buf)
 	if err != nil {
 		if e, ok := err.(net.Error); !ok || !e.Timeout() {
@@ -149,6 +149,22 @@ func logLeader(message string) {
 
 func logClient(message string) {
 	log("GOCLIENT: " + message)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
 }
 
 func encodeMessage(message interface{}) []byte {
@@ -319,15 +335,14 @@ func addContinuedMove(moves MovesMessage, pid string) {
 	nextMove := gameState.Positions[pid]
 
 	switch nextMove.Direction {
-	// TODO: add maxs and mins
 	case "UP":
-		nextMove.Y = nextMove.Y - 1
+		nextMove.Y = max(0, nextMove.Y-1)
 	case "DOWN":
-		nextMove.Y = nextMove.Y + 1
+		nextMove.Y = min(gameState.GridHeight-1, nextMove.Y+1)
 	case "LEFT":
-		nextMove.X = nextMove.X - 1
+		nextMove.X = max(0, nextMove.X-1)
 	case "RIGHT":
-		nextMove.X = nextMove.X + 1
+		nextMove.X = min(gameState.GridWidth-1, nextMove.X+1)
 	default:
 		panic("Next move direction unknown")
 	}
@@ -395,6 +410,7 @@ func leaderListener(leaderAddrString string) {
 	// MAIN GAME LOOP
 	isNewRound := true
 	var roundMoves MovesMessage
+	var timeoutTimeForRound time.Time
 	for {
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
@@ -402,13 +418,12 @@ func leaderListener(leaderAddrString string) {
 			leaderBroadcast(conn, newRoundMessage)
 			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: make(map[string]Move)}}
 			isNewRound = false
+			timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 			logLeader("done sending round start messages.")
 		}
-
 		// read messages from followers and forward them
 		logLeader("Waiting to receive message from follower...")
-		// TODO: actualy the delta of how much time we have left to wait
-		buf, _, timedout := readFromUDPWithTimeout(conn, FOLLOWER_RESPONSE_TIME)
+		buf, _, timedout := readFromUDPWithTimeout(conn, timeoutTimeForRound)
 
 		// TODO: check relevant round
 		if !timedout {
@@ -422,7 +437,6 @@ func leaderListener(leaderAddrString string) {
 
 		} else {
 			logLeader("Timed out")
-
 		}
 		if gameOver() {
 			break
@@ -431,7 +445,6 @@ func leaderListener(leaderAddrString string) {
 		// end condition; reply to my followers if I have been messaged by all of them
 		if timeToRespond(roundMoves, timedout) {
 			byt := encodeMessage(roundMoves)
-
 			// send message to all followers
 			leaderBroadcast(conn, byt)
 			// start a new round of communication
@@ -490,22 +503,19 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 		}
 
 		// wait for message from java
-		message := <-sendChan // TODO make this
+		message := <-sendChan
 
 		// write message to leader address
-		//SECOND//
 		_, err = conn.WriteToUDP([]byte(message), leaderAddr)
 		checkError(err)
 
 		// read response from leader
 		buf, _ = readFromUDP(conn)
-		//THIRD//
 
 		// write back to channel with byte response
 		recvChan <- string(buf)
 	}
-
-	// TODO END GAME SCREEN (RESULTS)
+	logClient("My work here as a client is done. Goodbye")
 }
 
 func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString string, wg sync.WaitGroup, isLeader bool) {
