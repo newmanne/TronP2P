@@ -102,7 +102,8 @@ public class GoSender implements Disposable {
                     Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + message);
                     final JsonNode jsonNode = JSONUtils.getMapper().readTree(message);
                     final String name = jsonNode.get("eventName").asText();
-                    Gdx.app.log(TronP2PGame.SERVER_TAG, "Event received is of type " + name);
+                    final int round = jsonNode.get("round").asInt();
+                    Gdx.app.log(TronP2PGame.SERVER_TAG, "Event received is of type " + name + " for round " + round);
                     final Object event = JSONUtils.getMapper().treeToValue(jsonNode.get(name), nameToEvent.get(name));
                     // special case if a game start event is received
                     if (event instanceof GameStartEvent) {
@@ -166,7 +167,6 @@ public class GoSender implements Disposable {
 
     @Data
     public static class RoundStartEvent {
-        String pid;
         int round;
     }
 
@@ -183,11 +183,12 @@ public class GoSender implements Disposable {
     public static class MoveEvent {
         String eventName = "myMove";
 
-        public MoveEvent(PositionAndDirection positionAndDirection, String pid) {
+        public MoveEvent(PositionAndDirection positionAndDirection, String pid, int round) {
             this.x = positionAndDirection.getX();
             this.y = positionAndDirection.getY();
             this.direction = positionAndDirection.getDirection();
             this.pid = pid;
+            this.round = round;
         }
 
         int x;
@@ -200,6 +201,7 @@ public class GoSender implements Disposable {
         }
 
         String pid;
+        int round;
     }
 
     @Data
@@ -207,15 +209,17 @@ public class GoSender implements Disposable {
     public static class DeathEvent {
         String eventName = "myDeath";
 
-        public DeathEvent(String pid) {
-            this.pid = pid;
+        public DeathEvent(String pid, int round) {
+            this.pid = pid; this.round = round;
         }
         String pid;
+        int round;
     }
 
     @Data
     public static class MovesEvent {
         Map<String, PositionAndDirection> moves;
+        int round;
     }
 
     public interface GoInitializedCallback {

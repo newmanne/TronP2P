@@ -44,6 +44,7 @@ type GameState struct {
 }
 
 type RoundStart struct {
+	Round int `json:"round"`
 }
 
 type RoundStartMessage struct {
@@ -81,6 +82,7 @@ type GameStart struct {
 
 type GameStartMessage struct {
 	EventName string `json:"eventName"`
+	Round     int    `json:"round"`
 	GameStart `json:"gameStart"`
 }
 
@@ -105,9 +107,9 @@ var FOLLOWER_RESPONSE_FAIL_RATE = 0                 // out of 1000, fail rate fo
 
 // UTILITY FUNCTIONS
 
-func readFromUDPWithTimeout(conn *net.UDPConn, timeout time.Duration) ([]byte, *net.UDPAddr, bool) {
+func readFromUDPWithTimeout(conn *net.UDPConn, timeoutTime time.Time) ([]byte, *net.UDPAddr, bool) {
 	buf := make([]byte, 4096)
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	conn.SetReadDeadline(timeoutTime)
 	_, raddr, err := conn.ReadFromUDP(buf)
 	if err != nil {
 		if e, ok := err.(net.Error); !ok || !e.Timeout() {
@@ -151,6 +153,22 @@ func logClient(message string) {
 	log("GOCLIENT: " + message)
 }
 
+func max(a, b int) int {
+	if a > b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
 func encodeMessage(message interface{}) []byte {
 	val, e := json.Marshal(message)
 	checkError(e)
@@ -159,22 +177,22 @@ func encodeMessage(message interface{}) []byte {
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
-	message := RoundStartMessage{EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{}}
+	message := RoundStartMessage{EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
 	return encodeMessage(message)
 }
 
-func parseMessage(buf []byte) (Move, string) {
+func parseMessage(buf []byte) (Move, string, int) {
 	fmt.Println("Parsing the following message " + string(buf))
 	var dat map[string]interface{}
 	err := json.Unmarshal(buf, &dat)
 	checkError(err)
 
 	fmt.Println("dat: ", dat)
-
-	// TODO: error handling, default actions
+	roundString, _ := dat["round"].(float64)
+	round := int(roundString)
 	eventName := dat["eventName"].(string)
-	var res Move
 	pid, _ := dat["pid"].(string)
+	var res Move
 	switch eventName {
 	case "myMove":
 		x, _ := dat["x"].(float64)
@@ -193,7 +211,7 @@ func parseMessage(buf []byte) (Move, string) {
 	}
 
 	logLeader("parsed message: " + string(encodeMessage(res)))
-	return res, pid
+	return res, pid, round
 }
 
 func CreateInitPlayerPosition() Move {
@@ -224,7 +242,7 @@ func isGameOverMessage(message string) bool {
 }
 
 func startGameMessage(pid string, startingPositions map[string]Move) GameStartMessage {
-	return GameStartMessage{EventName: "gameStart", GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
+	return GameStartMessage{EventName: "gameStart", Round: gameState.Round, GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
 }
 
 func endGameMessage() GameOverMessage {
@@ -310,13 +328,13 @@ func gameOver() bool {
 
 func resetGracePeriod(pid string) {
 	gameState.Grace[pid] = 0
-	logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
+	logLeader("player " + pid + " grace period = " + strconv.Itoa(gameState.Grace[pid]))
 }
 
 func countGracePeriod(pid string) {
 	if !gameState.DroppedForever[pid] {
 		gameState.Grace[pid] += 1
-		logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
+		logLeader("player " + pid + " grace period = " + strconv.Itoa(gameState.Grace[pid]))
 
 		if gameState.Grace[pid] >= MAX_GRACE_PERIOD {
 			killPlayer(pid)
@@ -330,15 +348,14 @@ func addContinuedMove(moves MovesMessage, pid string) {
 	nextMove := gameState.Positions[pid]
 
 	switch nextMove.Direction {
-	// TODO: add maxs and mins
 	case "UP":
-		nextMove.Y = nextMove.Y - 1
+		nextMove.Y = max(0, nextMove.Y-1)
 	case "DOWN":
-		nextMove.Y = nextMove.Y + 1
+		nextMove.Y = min(gameState.GridHeight-1, nextMove.Y+1)
 	case "LEFT":
-		nextMove.X = nextMove.X - 1
+		nextMove.X = max(0, nextMove.X-1)
 	case "RIGHT":
-		nextMove.X = nextMove.X + 1
+		nextMove.X = min(gameState.GridWidth-1, nextMove.X+1)
 	default:
 		panic("Next move direction unknown")
 	}
@@ -387,7 +404,7 @@ func leaderBroadcast(conn *net.UDPConn, message []byte) {
 	}
 }
 
-// main leader function, approves moves of followers, TODO add leader hierarchy
+// main leader function, approves moves of followers
 func leaderListener(leaderAddrString string) {
 	// Listen
 	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
@@ -406,6 +423,7 @@ func leaderListener(leaderAddrString string) {
 	// MAIN GAME LOOP
 	isNewRound := true
 	var roundMoves MovesMessage
+	var timeoutTimeForRound time.Time
 	for {
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
@@ -413,27 +431,27 @@ func leaderListener(leaderAddrString string) {
 			leaderBroadcast(conn, newRoundMessage)
 			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: make(map[string]Move)}}
 			isNewRound = false
+			timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 			logLeader("done sending round start messages.")
 		}
-
 		// read messages from followers and forward them
 		logLeader("Waiting to receive message from follower...")
-		// TODO: actualy the delta of how much time we have left to wait
-		buf, _, timedout := readFromUDPWithTimeout(conn, FOLLOWER_RESPONSE_TIME)
+		buf, _, timedout := readFromUDPWithTimeout(conn, timeoutTimeForRound)
 
-		// TODO: check relevant round
 		if !timedout {
-			move, pid := parseMessage(buf)
-			// artifical missed response for testing
-			received := surviveFollowerResponseInjectedFailure()
-			if received {
-				roundMoves.Moves.Moves[pid] = move
+			move, pid, round := parseMessage(buf)
+			if round == gameState.Round {
+				// artifical missed response for testing
+				received := surviveFollowerResponseInjectedFailure()
+				if received {
+					roundMoves.Moves.Moves[pid] = move
+				}
+				logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
+			} else {
+				logLeader("Recieved a move message from " + pid + " from an old round " + strconv.Itoa(round) + " but current round is " + strconv.Itoa(gameState.Round) + ". Ignoring message")
 			}
-			logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
-
 		} else {
 			logLeader("Timed out")
-
 		}
 		if gameOver() {
 			break
@@ -442,7 +460,6 @@ func leaderListener(leaderAddrString string) {
 		// end condition; reply to my followers if I have been messaged by all of them
 		if timeToRespond(roundMoves, timedout) {
 			byt := encodeMessage(roundMoves)
-
 			// send message to all followers
 			leaderBroadcast(conn, byt)
 			// start a new round of communication
@@ -501,22 +518,19 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 		}
 
 		// wait for message from java
-		message := <-sendChan // TODO make this
+		message := <-sendChan
 
 		// write message to leader address
-		//SECOND//
 		_, err = conn.WriteToUDP([]byte(message), leaderAddr)
 		checkError(err)
 
 		// read response from leader
 		buf, _ = readFromUDP(conn)
-		//THIRD//
 
 		// write back to channel with byte response
 		recvChan <- string(buf)
 	}
-
-	// TODO END GAME SCREEN (RESULTS)
+	logClient("My work here as a client is done. Goodbye")
 }
 
 func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString string, wg sync.WaitGroup, isLeader bool) {
@@ -570,10 +584,8 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		// send buf to leader channel
 		sendChan <- status
 
-		// read reply (timeToReply?) from leader (TODO: use a select w/ timeout?)
 		reply := <-recvChan
 
-		// TODO: only write back after receiving multiple replies, or after ticker timeout
 		conn.Write([]byte(reply + "\n"))
 		checkError(err)
 	}
