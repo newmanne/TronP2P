@@ -59,6 +59,7 @@ public class GameScreen extends ScreenAdapter {
     private final Map<String, PositionAndDirection> playerPositions;
     private final int[][] grid;
     private final String pid;
+    private int round;
     private boolean dead;
 
     private float accumulator;
@@ -80,6 +81,7 @@ public class GameScreen extends ScreenAdapter {
         playerPositions = startingPositions;
         tronInput = new TronInput(getPositionAndDirection().getDirection());
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
+        round = 0;
         hud = new Stage(new StretchViewport(GameScreen.V_WIDTH, GameScreen.V_HEIGHT), game.getSpritebatch());
         final Table rootTable = new Table();
         rootTable.setFillParent(true);
@@ -106,6 +108,7 @@ public class GameScreen extends ScreenAdapter {
 
         for (Object event : goEvents) {
             if (event instanceof GoSender.RoundStartEvent) {
+                round = ((GoSender.RoundStartEvent) event).getRound();
                 if (!dead) {
                     final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(getPositionAndDirection());
                     switch (tronInput.getProvisionalDirection()) {
@@ -127,14 +130,14 @@ public class GameScreen extends ScreenAdapter {
                             break;
                     }
                     if (collisionWithWall(provisionalPositionAndDirection)) {
-                        game.getGoSender().sendToGo(new GoSender.DeathEvent(pid));
+                        game.getGoSender().sendToGo(new GoSender.DeathEvent(pid, round));
                         dead = true;
                     } else {
-                        game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid));
+                        game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid, round));
                     }
                 } else {
                     // you are dead, so keep sending the same move back over and over
-                    game.getGoSender().sendToGo(new GoSender.MoveEvent(getPositionAndDirection(), pid));
+                    game.getGoSender().sendToGo(new GoSender.MoveEvent(getPositionAndDirection(), pid, round));
                 }
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves

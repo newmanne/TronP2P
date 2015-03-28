@@ -44,6 +44,7 @@ type GameState struct {
 }
 
 type RoundStart struct {
+	Round int `json:"round"`
 }
 
 type RoundStartMessage struct {
@@ -81,6 +82,7 @@ type GameStart struct {
 
 type GameStartMessage struct {
 	EventName string `json:"eventName"`
+	Round     int    `json:"round"`
 	GameStart `json:"gameStart"`
 }
 
@@ -175,7 +177,7 @@ func encodeMessage(message interface{}) []byte {
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
-	message := RoundStartMessage{EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{}}
+	message := RoundStartMessage{EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
 	return encodeMessage(message)
 }
 
@@ -186,7 +188,7 @@ func parseMessage(buf []byte) (Move, string, int) {
 	checkError(err)
 
 	fmt.Println("dat: ", dat)
-	roundString, _ := dat["round"]
+	roundString, _ := dat["round"].(float64)
 	round := int(roundString)
 	eventName := dat["eventName"].(string)
 	pid, _ := dat["pid"].(string)
@@ -229,7 +231,7 @@ func isGameOverMessage(message string) bool {
 }
 
 func startGameMessage(pid string, startingPositions map[string]Move) GameStartMessage {
-	return GameStartMessage{EventName: "gameStart", GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
+	return GameStartMessage{EventName: "gameStart", Round: gameState.Round, GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
 }
 
 func endGameMessage() GameOverMessage {
