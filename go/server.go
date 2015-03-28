@@ -317,13 +317,13 @@ func gameOver() bool {
 
 func resetGracePeriod(pid string) {
 	gameState.Grace[pid] = 0
-	logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
+	logLeader("player " + pid + " grace period = " + strconv.Itoa(gameState.Grace[pid]))
 }
 
 func countGracePeriod(pid string) {
 	if !gameState.DroppedForever[pid] {
 		gameState.Grace[pid] += 1
-		logLeader("player " + pid + "grace period = " + strconv.Itoa(gameState.Grace[pid]))
+		logLeader("player " + pid + " grace period = " + strconv.Itoa(gameState.Grace[pid]))
 
 		if gameState.Grace[pid] >= MAX_GRACE_PERIOD {
 			killPlayer(pid)

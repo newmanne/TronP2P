@@ -131,6 +131,7 @@ public class GameScreen extends ScreenAdapter {
                     }
                     if (collisionWithWall(provisionalPositionAndDirection)) {
                         game.getGoSender().sendToGo(new GoSender.DeathEvent(pid, round));
+                        // TODO: I don't think the java can really make this call - what if you had to change directions in order to die?
                         dead = true;
                     } else {
                         game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid, round));
@@ -145,7 +146,6 @@ public class GameScreen extends ScreenAdapter {
                     PositionAndDirection move = entry.getValue();
                     grid[move.getX()][move.getY()] = Integer.parseInt(entry.getKey());
                     playerPositions.put(entry.getKey(), move);
-
                 });
             } else if (event instanceof GoSender.GameOverEvent) {
                 final List<String> pidsInOrderOfDeath = ((GoSender.GameOverEvent) event).getPidsInOrderOfDeath();
