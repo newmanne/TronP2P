@@ -197,7 +197,18 @@ func parseMessage(buf []byte) (Move, string) {
 }
 
 func CreateInitPlayerPosition() Move {
-	return Move{X: randomInt(0, gameState.GridWidth), Y: randomInt(0, gameState.GridHeight), Direction: "UP"}
+	var direction string
+	directionId := randomInt(0, 4)
+	if directionId == 0 {
+		direction = "UP"
+	} else if directionId == 1 {
+		direction = "DOWN"
+	} else if directionId == 2 {
+		direction = "LEFT"
+	} else {
+		direction = "RIGHT"
+	}
+	return Move{X: randomInt(0, gameState.GridWidth), Y: randomInt(0, gameState.GridHeight), Direction: direction}
 }
 
 func isJoinMessage(buf []byte) bool {
@@ -570,6 +581,9 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 
 func main() {
 	fmt.Println("Go process started")
+	if FOLLOWER_RESPONSE_TIME < MIN_GAME_SPEED {
+		panic("Can't set response time to be less than min game speed")
+	}
 
 	// argument parsing
 	if len(os.Args) != 7 {
