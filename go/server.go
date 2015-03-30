@@ -95,9 +95,18 @@ type GameOverMessage struct {
 	GameOver  `json:"gameOver"`
 }
 
+type ElectionState int
+
+const (
+	NORMAL ElectionState = 1 + iota
+	QUORUM
+	NEWLEADER
+)
+
 // GLOBAL VARS
 
 var gameState GameState
+var electionState = NORMAL
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
 var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new java move
@@ -488,7 +497,8 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 
 	// Read response from leader
 	logClient("Waiting for leader to respond with game start details")
-	buf, _ := readFromUDP(conn)
+
+	buf, _ = readFromUDP(conn)
 	logClient("Received a game start response from the leader:" + string(buf))
 
 	// write back to channel with byte response (let java know to start)
@@ -496,9 +506,23 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 
 	logClient("LOBBY PHASE IS OVER. ENTERING MAIN LOOP")
 	// MAIN GAME LOOP
+	var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
+	killChan := make(chan bool, 1)
 	for {
 		// read round start from leader
-		buf, _ = readFromUDP(conn)
+		buf, _, timeout := readFromUDPWithTimeout(conn, timeoutTime)
+		if timeout {
+			if electionState == NORMAL {
+				electionState = QUORUM
+				
+				go electNewLeader(killChan)
+			}
+			continue
+		} else if electionState == QUORUM {
+			electionState = NORMAL
+			killChan <- true
+		}
+		
 		logClient("Got message " + string(buf) + " from leader, passing it to java")
 		recvChan <- string(buf)
 		if isGameOverMessage(string(buf)) {
@@ -567,6 +591,8 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		// read some reply from the java game (update of move, or death)
 		time.Sleep(MIN_GAME_SPEED)
 		status, err := connBuf.ReadString('\n')
+
+		
 		logJava("Received: " + status)
 		checkError(err)
 
@@ -637,4 +663,43 @@ func checkError(err error) {
 		fmt.Fprintf(os.Stderr, "Error ", err.Error())
 		os.Exit(1)
 	}
+}
+
+func electNewLeader(killChan chan bool) {
+	newAddr, err := net.ResolveUDPAddr("udp", ":0")
+	checkError(err)
+	conn, err := net.ListenUDP("udp", newAddr)
+	checkError(err)
+	var message []byte
+	var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
+	var timeout bool
+	var buf []byte
+	var count = 0
+	var positive = 0
+	
+	leaderBroadcast(conn, message)
+	
+	for i:=0; i < len(gameState.AddrToPID); i++ {
+		buf, raddr, timeout := readFromUDPWithTimeout(conn, timeoutTime)
+		if timeout {
+			break
+		} else if gameState.AddrToPID[raddr] > gameState.MyPid {
+			electionState = NORMAL
+			return
+		} else {
+			count++
+			if /*message is positive*/ {
+				positive++
+			}
+		}
+	}
+
+	if positive <  count/2 {
+		electionState = NORMAL
+		return
+	}
+
+	electionState = NEWLEADER
+
+	/*elect leader */
 }
