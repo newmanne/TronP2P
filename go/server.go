@@ -105,6 +105,10 @@ type GameOverMessage struct {
 	GameOver  `json:"gameOver"`
 }
 
+type LeaderDeadMessage struct {
+	EventName string 'json:"eventName"'
+	Round int 'json:"round"'
+}
 
 type ElectionState int
 
@@ -196,6 +200,13 @@ func encodeMessage(message interface{}) []byte {
 	return val
 }
 
+func decodeMessage(message []byte) interface{} {
+	var dat map[string]interface{}
+	err := json.Unmarshal(buf, &dat)
+	checkError(err)
+	return dat
+}
+
 func newRoundMessage() []byte {
 	gameState.Round += 1
 	message := RoundStartMessage{EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
@@ -204,9 +215,7 @@ func newRoundMessage() []byte {
 
 func parseMessage(buf []byte) (string, string, int) {
 	fmt.Println("Parsing the following message " + string(buf))
-	var dat map[string]interface{}
-	err := json.Unmarshal(buf, &dat)
-	checkError(err)
+	dat := decodeMessage(buf)
 
 	fmt.Println("dat: ", dat)
 	roundString, _ := dat["round"].(float64)
@@ -466,7 +475,7 @@ func leaderListener(leaderAddrString string) {
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
 			newRoundMessage := newRoundMessage()
-			leaderBroadcast(conn, newRoundMessage)
+			broadcastMessage(conn, newRoundMessage)
 			slideWindow()
 			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: gameState.Positions, Round: gameState.Round}}
 			isNewRound = false
@@ -507,14 +516,14 @@ func leaderListener(leaderAddrString string) {
 		if timeToRespond(timedout) {
 			byt := encodeMessage(roundMoves)
 			// send message to all followers
-			leaderBroadcast(conn, byt)
+			broadcastMessage(conn, byt)
 			// start a new round of communication
 			isNewRound = true
 		}
 	}
 
 	// END GAME SCREEN (RESULTS)
-	leaderBroadcast(conn, encodeMessage(endGameMessage()))
+	broadcastMessage(conn, encodeMessage(endGameMessage()))
 	logLeader("My work here as leader is done. Goodbye.")
 }
 
@@ -724,14 +733,15 @@ func electNewLeader(killChan chan bool) {
 	checkError(err)
 	conn, err := net.ListenUDP("udp", newAddr)
 	checkError(err)
-	var message []byte
 	var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 	var timeout bool
 	var buf []byte
 	var count = 0
 	var positive = 0
-	
-	leaderBroadcast(conn, message)
+
+	message := LeaderDeadMessage{EventName: "check", Round: gameState.Round}
+	byt := encodeMessage(message)
+	broadcastMessage(conn, byt)
 	
 	for i:=0; i < len(gameState.AddrToPID); i++ {
 		buf, raddr, timeout := readFromUDPWithTimeout(conn, timeoutTime)
@@ -742,8 +752,18 @@ func electNewLeader(killChan chan bool) {
 			return
 		} else {
 			count++
-			if /*message is positive*/ {
-				positive++
+			dat := decodeMessage(buf)
+			roundString, _ := dat["round"].(float64)
+			round := int(roundString)
+			eventName := dat["eventName"].(string)
+			if round >= gameState.Round {
+				if eventName == "dead" {
+					positive++
+				} else if eventName == "check" /*&& is before me in the list*/ {
+					return //maybe clean up?  so to avoid late messages. might try to close connection
+				}
+			} else {
+				//breaK? not sure, probably better not
 			}
 		}
 	}
