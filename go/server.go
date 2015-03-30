@@ -14,11 +14,20 @@ import (
 	"time"
 )
 
-// STRUCTURES
+// GLOBAL VARS
 
+var gameState GameState
+var DISABLE_GAME_OVER = true // to allow single player game for debugging
+var COLLISION_IS_DEATH = true
+var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond // time for followers to respond
+var MAX_ALLOWABLE_MISSED_MESSAGES = 5               // max number of consecutive missed messages
+var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{
+	"1": 10,
+} // out of 1000, fail rate for responses not to be received
+
+// STRUCTURES
 type MyMove struct {
-	X         int    `json:"x"`
-	Y         int    `json:"y"`
 	Direction string `json:"direction"`
 	Pid       string `json:"pid"`
 }
@@ -34,7 +43,7 @@ type GameState struct {
 	MyPid          int
 	GridWidth      int
 	GridHeight     int
-	Positions      map[string]Move
+	Positions      []map[string]Move
 	Alive          map[string]bool
 	Grace          map[string]int
 	Finish         []string
@@ -71,7 +80,8 @@ type MovesMessage struct {
 }
 
 type Moves struct {
-	Moves map[string]Move `json:"moves"`
+	Moves []map[string]Move `json:"moves"`
+	Round int               `json:"round"`
 }
 
 type GameStart struct {
@@ -95,6 +105,7 @@ type GameOverMessage struct {
 	GameOver  `json:"gameOver"`
 }
 
+
 type ElectionState int
 
 const (
@@ -113,6 +124,7 @@ var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new ja
 var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond // time for followers to respond
 var MAX_GRACE_PERIOD = 3                            // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = 0                 // out of 1000, fail rate for responses not to be received
+
 
 // UTILITY FUNCTIONS
 
@@ -190,7 +202,7 @@ func newRoundMessage() []byte {
 	return encodeMessage(message)
 }
 
-func parseMessage(buf []byte) (Move, string, int) {
+func parseMessage(buf []byte) (string, string, int) {
 	fmt.Println("Parsing the following message " + string(buf))
 	var dat map[string]interface{}
 	err := json.Unmarshal(buf, &dat)
@@ -201,30 +213,30 @@ func parseMessage(buf []byte) (Move, string, int) {
 	round := int(roundString)
 	eventName := dat["eventName"].(string)
 	pid, _ := dat["pid"].(string)
-	var res Move
+	var direction string
 	switch eventName {
 	case "myMove":
-		x, _ := dat["x"].(float64)
-		y, _ := dat["y"].(float64)
-		d, _ := dat["direction"].(string)
-		res = Move{X: int(x), Y: int(y), Direction: d}
-		gameState.Positions[pid] = res
-	case "myDeath":
-		if COLLISION_IS_DEATH {
-			logLeader("Player " + pid + " is dead")
-			killPlayer(pid)
-		}
-		res = gameState.Positions[pid]
+		direction, _ = dat["direction"].(string)
 	default:
 		panic("Did not understand event " + eventName)
 	}
-
-	logLeader("parsed message: " + string(encodeMessage(res)))
-	return res, pid, round
+	logLeader("parsed message: player " + pid + " is going in direction " + direction + " on round " + strconv.Itoa(round))
+	return direction, pid, round
 }
 
 func CreateInitPlayerPosition() Move {
-	return Move{X: randomInt(0, gameState.GridWidth), Y: randomInt(0, gameState.GridHeight), Direction: "UP"}
+	var direction string
+	directionId := randomInt(0, 4)
+	if directionId == 0 {
+		direction = "UP"
+	} else if directionId == 1 {
+		direction = "DOWN"
+	} else if directionId == 2 {
+		direction = "LEFT"
+	} else {
+		direction = "RIGHT"
+	}
+	return Move{X: randomInt(1, gameState.GridWidth-2), Y: randomInt(1, gameState.GridHeight-2), Direction: direction}
 }
 
 func isJoinMessage(buf []byte) bool {
@@ -263,6 +275,24 @@ func killPlayer(pid string) {
 	}
 }
 
+func getCurrentMoveMap() map[string]Move {
+	return gameState.Positions[len(gameState.Positions)-1]
+}
+
+func slideWindow() {
+	// push everything back
+	for i := 0; i < len(gameState.Positions)-1; i++ {
+		gameState.Positions[i] = gameState.Positions[i+1]
+	}
+	// clear final move
+	gameState.Positions[len(gameState.Positions)-1] = make(map[string]Move)
+}
+
+// TODO: when the board state is moved over
+func isCollision(x, y int) bool {
+	return false
+}
+
 /*
  At the end of the lobby session, the following things must be true:
  1) all players know the IP, pid, and start positions of all other players
@@ -286,22 +316,22 @@ func initLobby(conn *net.UDPConn) {
 		// what type of message is it? join or start game?
 		if isJoinMessage(buf) {
 			if _, knownPlayer := gameState.AddrToPid[raddr]; !knownPlayer {
-				pid := strconv.Itoa(len(gameState.Positions) + 1)
-				gameState.Positions[pid] = CreateInitPlayerPosition()
+				pid := strconv.Itoa(len(getCurrentMoveMap()) + 1)
+				getCurrentMoveMap()[pid] = CreateInitPlayerPosition()
 				gameState.Alive[pid] = true
 				gameState.AddrToPid[raddr] = pid
 				gameState.Alive[pid] = true
 				nickname := strings.Split(string(buf), ":")[1]
 				gameState.PidToNickname[pid] = nickname
 				logLeader("New player named " + nickname + " has joined from address " + raddr.String())
-				logLeader("Assigning pid " + pid + " and starting position " + strconv.Itoa(gameState.Positions[pid].X) + "," + strconv.Itoa(gameState.Positions[pid].Y))
+				logLeader("Assigning pid " + pid + " and starting position " + strconv.Itoa(getCurrentMoveMap()[pid].X) + "," + strconv.Itoa(getCurrentMoveMap()[pid].Y))
 			}
 		} else if isStartMessage(buf) {
 			logLeader("The game start message has been sent! Notifying all players")
 			// send message to all players to start game
 			for player, pid := range gameState.AddrToPid {
 				// TODO: we probably care about whether or not this one is received
-				newGameMsg := encodeMessage(startGameMessage(pid, gameState.Positions))
+				newGameMsg := encodeMessage(startGameMessage(pid, getCurrentMoveMap()))
 				logLeader("Sending a game start message to " + player.String() + ". " + string(newGameMsg))
 				_, err := conn.WriteToUDP(newGameMsg, player)
 				checkError(err)
@@ -334,7 +364,8 @@ func countGracePeriod(pid string) {
 		gameState.Grace[pid] += 1
 		logLeader("player " + pid + " grace period = " + strconv.Itoa(gameState.Grace[pid]))
 
-		if gameState.Grace[pid] >= MAX_GRACE_PERIOD {
+		if gameState.Grace[pid] >= MAX_ALLOWABLE_MISSED_MESSAGES {
+			logLeader("Grace period for player " + pid + " exceeded. Force dropping them")
 			killPlayer(pid)
 			gameState.DroppedForever[pid] = true
 		}
@@ -342,49 +373,58 @@ func countGracePeriod(pid string) {
 }
 
 // if pid did not respond, their next move is to continue in next direction one move in advance
-func addContinuedMove(moves MovesMessage, pid string) {
-	nextMove := gameState.Positions[pid]
+func addContinuedMove(pid string) {
+	prevMove := gameState.Positions[len(gameState.Positions)-2][pid]
+	makeMove(prevMove.Direction, pid)
+}
 
+func makeMove(direction string, pid string) Move {
+	prevMove := gameState.Positions[len(gameState.Positions)-2][pid]
+	nextMove := Move{Direction: direction, X: prevMove.X, Y: prevMove.Y}
 	switch nextMove.Direction {
-	case "UP":
-		nextMove.Y = max(0, nextMove.Y-1)
 	case "DOWN":
-		nextMove.Y = min(gameState.GridHeight-1, nextMove.Y+1)
+		nextMove.Y = max(1, nextMove.Y-1)
+	case "UP":
+		nextMove.Y = min(gameState.GridHeight-2, nextMove.Y+1)
 	case "LEFT":
-		nextMove.X = max(0, nextMove.X-1)
+		nextMove.X = max(1, nextMove.X-1)
 	case "RIGHT":
-		nextMove.X = min(gameState.GridWidth-1, nextMove.X+1)
+		nextMove.X = min(gameState.GridWidth-2, nextMove.X+1)
 	default:
 		panic("Next move direction unknown")
 	}
-
-	moves.Moves.Moves[pid] = nextMove
+	getCurrentMoveMap()[pid] = nextMove
+	return nextMove
 }
 
 // to simulate missed responses; some of the time we will miss follower responses
 // and resort to timeout; this is one of those times
-func surviveFollowerResponseInjectedFailure() bool {
-	p := randomInt(0, 1000)
-	return p >= FOLLOWER_RESPONSE_FAIL_RATE
+func surviveFollowerResponseInjectedFailure(pid string) bool {
+	if val, ok := FOLLOWER_RESPONSE_FAIL_RATE[pid]; ok {
+		p := randomInt(0, 1000)
+		return p >= val
+	} else {
+		return true
+	}
 }
 
 // determines if leader can respond to followers yet
-func timeToRespond(moves MovesMessage, timedout bool) bool {
-	recvCount := len(moves.Moves.Moves)
+func timeToRespond(timedout bool) bool {
+	recvCount := len(getCurrentMoveMap())
 	totalNeeded := len(gameState.AddrToPid) - len(gameState.DroppedForever)
 	logLeader("received " + strconv.Itoa(recvCount) + "/" + strconv.Itoa(totalNeeded) + " messages")
 
 	if recvCount == totalNeeded || timedout {
 		// count missed messages for those who did not respond, or reset
 		for pid, alive := range gameState.Alive {
-			_, responded := moves.Moves.Moves[pid]
+			_, responded := getCurrentMoveMap()[pid]
 			if responded {
 				resetGracePeriod(pid)
 			} else {
 				countGracePeriod(pid)
 				// don't move them if they are dead
 				if alive {
-					addContinuedMove(moves, pid)
+					addContinuedMove(pid)
 				}
 			}
 		}
@@ -427,7 +467,8 @@ func leaderListener(leaderAddrString string) {
 		if isNewRound {
 			newRoundMessage := newRoundMessage()
 			leaderBroadcast(conn, newRoundMessage)
-			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: make(map[string]Move)}}
+			slideWindow()
+			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: gameState.Positions, Round: gameState.Round}}
 			isNewRound = false
 			timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 			logLeader("done sending round start messages.")
@@ -437,14 +478,21 @@ func leaderListener(leaderAddrString string) {
 		buf, _, timedout := readFromUDPWithTimeout(conn, timeoutTimeForRound)
 
 		if !timedout {
-			move, pid, round := parseMessage(buf)
-			if round == gameState.Round {
+			direction, pid, round := parseMessage(buf)
+			if round == gameState.Round && !gameState.DroppedForever[pid] {
 				// artifical missed response for testing
-				received := surviveFollowerResponseInjectedFailure()
+				received := surviveFollowerResponseInjectedFailure(pid)
 				if received {
-					roundMoves.Moves.Moves[pid] = move
+					move := makeMove(direction, pid)
+					if COLLISION_IS_DEATH && isCollision(move.X, move.Y) {
+						logLeader("Player " + pid + " is dead")
+						killPlayer(pid)
+					}
+					getCurrentMoveMap()[pid] = move
+					logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
+				} else {
+					logLeader("Fault injection removed message")
 				}
-				logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
 			} else {
 				logLeader("Recieved a move message from " + pid + " from an old round " + strconv.Itoa(round) + " but current round is " + strconv.Itoa(gameState.Round) + ". Ignoring message")
 			}
@@ -456,7 +504,7 @@ func leaderListener(leaderAddrString string) {
 		}
 
 		// end condition; reply to my followers if I have been messaged by all of them
-		if timeToRespond(roundMoves, timedout) {
+		if timeToRespond(timedout) {
 			byt := encodeMessage(roundMoves)
 			// send message to all followers
 			leaderBroadcast(conn, byt)
@@ -608,6 +656,9 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 
 func main() {
 	fmt.Println("Go process started")
+	if FOLLOWER_RESPONSE_TIME < MIN_GAME_SPEED {
+		panic("Can't set response time to be less than min game speed")
+	}
 
 	// argument parsing
 	if len(os.Args) != 7 {
@@ -629,7 +680,10 @@ func main() {
 	gameState.Round = 1
 	gameState.GridWidth = gridWidth
 	gameState.GridHeight = gridHeight
-	gameState.Positions = make(map[string]Move)
+	gameState.Positions = make([]map[string]Move, MAX_ALLOWABLE_MISSED_MESSAGES)
+	for i := 0; i < len(gameState.Positions); i++ {
+		gameState.Positions[i] = make(map[string]Move)
+	}
 	gameState.Alive = make(map[string]bool)
 	gameState.Grace = make(map[string]int)
 	gameState.AddrToPid = make(map[*net.UDPAddr]string)

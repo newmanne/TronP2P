@@ -60,7 +60,7 @@ public class GameScreen extends ScreenAdapter {
     private final int[][] grid;
     private final String pid;
     private int round;
-    private boolean dead;
+    private int lastUpdatedRound;
 
     private float accumulator;
 
@@ -82,6 +82,7 @@ public class GameScreen extends ScreenAdapter {
         tronInput = new TronInput(getPositionAndDirection().getDirection());
         viewport = new StretchViewport(V_WIDTH, V_HEIGHT);
         round = 0;
+        lastUpdatedRound = 0;
         hud = new Stage(new StretchViewport(GameScreen.V_WIDTH, GameScreen.V_HEIGHT), game.getSpritebatch());
         final Table rootTable = new Table();
         rootTable.setFillParent(true);
@@ -109,44 +110,25 @@ public class GameScreen extends ScreenAdapter {
         for (Object event : goEvents) {
             if (event instanceof GoSender.RoundStartEvent) {
                 round = ((GoSender.RoundStartEvent) event).getRound();
-                if (!dead) {
-                    final PositionAndDirection provisionalPositionAndDirection = new PositionAndDirection(getPositionAndDirection());
-                    switch (tronInput.getProvisionalDirection()) {
-                        case LEFT:
-                            provisionalPositionAndDirection.setDirection(Direction.LEFT);
-                            provisionalPositionAndDirection.setX(Math.max(0, getPositionAndDirection().getX() - 1));
-                            break;
-                        case RIGHT:
-                            provisionalPositionAndDirection.setDirection(Direction.RIGHT);
-                            provisionalPositionAndDirection.setX(Math.min(GRID_WIDTH - 1, getPositionAndDirection().getX() + 1));
-                            break;
-                        case DOWN:
-                            provisionalPositionAndDirection.setDirection(Direction.DOWN);
-                            provisionalPositionAndDirection.setY(Math.max(0, getPositionAndDirection().getY() - 1));
-                            break;
-                        case UP:
-                            provisionalPositionAndDirection.setDirection(Direction.UP);
-                            provisionalPositionAndDirection.setY(Math.min(GRID_HEIGHT - 1, getPositionAndDirection().getY() + 1));
-                            break;
-                    }
-                    if (collisionWithWall(provisionalPositionAndDirection)) {
-                        game.getGoSender().sendToGo(new GoSender.DeathEvent(pid, round));
-                        // TODO: I don't think the java can really make this call - what if you had to change directions in order to die?
-                        dead = true;
-                    } else {
-                        game.getGoSender().sendToGo(new GoSender.MoveEvent(provisionalPositionAndDirection, pid, round));
-                    }
-                } else {
-                    // you are dead, so keep sending the same move back over and over
-                    game.getGoSender().sendToGo(new GoSender.MoveEvent(getPositionAndDirection(), pid, round));
-                }
+                game.getGoSender().sendToGo(new GoSender.MoveEvent(tronInput.getProvisionalDirection(), pid, round));
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves
-                ((GoSender.MovesEvent) event).getMoves().entrySet().forEach(entry -> {
-                    PositionAndDirection move = entry.getValue();
-                    grid[move.getX()][move.getY()] = Integer.parseInt(entry.getKey());
-                    playerPositions.put(entry.getKey(), move);
-                });
+                final GoSender.MovesEvent movesEvent = (GoSender.MovesEvent) event;
+                final int messageRound = movesEvent.getRound();
+                final int numRoundsToUpdate = Math.min(messageRound - lastUpdatedRound, movesEvent.getMoves().size());
+                lastUpdatedRound = messageRound;
+                round = messageRound;
+                if (numRoundsToUpdate > 1) {
+                    Gdx.app.log(TronP2PGame.LOG_TAG, "Updating " + numRoundsToUpdate + " rounds through window");
+                }
+                final List<Map<String, PositionAndDirection>> moves = movesEvent.getMoves();
+                for (int i = moves.size() - numRoundsToUpdate; i < moves.size(); i++) {
+                    moves.get(i).entrySet().forEach(entry -> {
+                        final PositionAndDirection move = entry.getValue();
+                        grid[move.getX()][move.getY()] = Integer.parseInt(entry.getKey());
+                        playerPositions.put(entry.getKey(), move);
+                    });
+                }
             } else if (event instanceof GoSender.GameOverEvent) {
                 final List<String> pidsInOrderOfDeath = ((GoSender.GameOverEvent) event).getPidsInOrderOfDeath();
                 game.setScreen(new GameOverScreen(game, pidsInOrderOfDeath));
@@ -224,10 +206,6 @@ public class GameScreen extends ScreenAdapter {
             shapeRenderer.rectLine(wallVertices[i], wallVertices[i + 1], GRID_SIZE * 2);
         }
         shapeRenderer.end();
-    }
-
-    private boolean collisionWithWall(PositionAndDirection move) {
-        return grid[move.getX()][move.getY()] != UNOCCUPIED;
     }
 
     @Override

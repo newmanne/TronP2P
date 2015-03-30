@@ -183,42 +183,20 @@ public class GoSender implements Disposable {
     public static class MoveEvent {
         String eventName = "myMove";
 
-        public MoveEvent(PositionAndDirection positionAndDirection, String pid, int round) {
-            this.x = positionAndDirection.getX();
-            this.y = positionAndDirection.getY();
-            this.direction = positionAndDirection.getDirection();
+        public MoveEvent(Direction direction, String pid, int round) {
+            this.direction = direction;
             this.pid = pid;
             this.round = round;
         }
 
-        int x;
-        int y;
         Direction direction;
-
-        @JsonIgnore
-        public PositionAndDirection getPositionAndDirection() {
-            return new PositionAndDirection(x, y, direction);
-        }
-
-        String pid;
-        int round;
-    }
-
-    @Data
-    @NoArgsConstructor
-    public static class DeathEvent {
-        String eventName = "myDeath";
-
-        public DeathEvent(String pid, int round) {
-            this.pid = pid; this.round = round;
-        }
         String pid;
         int round;
     }
 
     @Data
     public static class MovesEvent {
-        Map<String, PositionAndDirection> moves;
+        List<Map<String, PositionAndDirection>> moves;
         int round;
     }
 
