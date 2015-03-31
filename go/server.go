@@ -39,6 +39,11 @@ type Move struct {
 	Direction string `json:"direction"`
 }
 
+type Client struct {
+	addr *net.UDPAddr
+	pid string
+}
+
 type GameState struct {
 	Round          int
 	MyPid          int
@@ -49,7 +54,7 @@ type GameState struct {
 	Alive          map[string]bool
 	Grace          map[string]int
 	Finish         []string
-	AddrToPid      map[*net.UDPAddr]string
+	AddrToPid      map[string]Client
 	PidToNickname  map[string]string
 	DroppedForever map[string]bool
 }
@@ -327,11 +332,12 @@ func initLobby(conn *net.UDPConn) {
 		buf, raddr := readFromUDP(conn)
 		// what type of message is it? join or start game?
 		if isJoinMessage(buf) {
-			if _, knownPlayer := gameState.AddrToPid[raddr]; !knownPlayer {
+			fmt.Println(raddr.String())
+			if _, knownPlayer := gameState.AddrToPid[raddr.String()]; !knownPlayer {
 				pid := strconv.Itoa(len(getCurrentMoveMap()) + 1)
 				getCurrentMoveMap()[pid] = CreateInitPlayerPosition()
 				gameState.Alive[pid] = true
-				gameState.AddrToPid[raddr] = pid
+				gameState.AddrToPid[raddr.String()] = Client{addr:raddr, pid: pid}
 				gameState.Alive[pid] = true
 				nickname := strings.Split(string(buf), ":")[1]
 				gameState.PidToNickname[pid] = nickname
@@ -341,11 +347,11 @@ func initLobby(conn *net.UDPConn) {
 		} else if isStartMessage(buf) {
 			logLeader("The game start message has been sent! Notifying all players")
 			// send message to all players to start game
-			for player, pid := range gameState.AddrToPid {
+			for addr, client := range gameState.AddrToPid {
 				// TODO: we probably care about whether or not this one is received
-				newGameMsg := encodeMessage(startGameMessage(pid, getCurrentMoveMap()))
-				logLeader("Sending a game start message to " + player.String() + ". " + string(newGameMsg))
-				_, err := conn.WriteToUDP(newGameMsg, player)
+				newGameMsg := encodeMessage(startGameMessage(client.pid, getCurrentMoveMap()))
+				logLeader("Sending a game start message to " + addr + ". " + string(newGameMsg))
+				_, err := conn.WriteToUDP(newGameMsg, client.addr)
 				checkError(err)
 			}
 			// end lobby phase, prepare to send round messages next
@@ -447,10 +453,10 @@ func timeToRespond(timedout bool) bool {
 }
 
 func broadcastMessage(conn *net.UDPConn, message []byte) {
-	for addr, pid := range gameState.AddrToPid {
-		_, err := conn.WriteToUDP(message,n addr)
+	for _, client := range gameState.AddrToPid {
+		_, err := conn.WriteToUDP(message, client.addr)
 		checkError(err)
-		logLeader("Sent message " + string(message) + " to player " + pid)
+		logLeader("Sent message " + string(message) + " to player " + client.pid)
 	}
 }
 
@@ -688,7 +694,7 @@ func initializeGameState() {
 	}
 	gameState.Alive = make(map[string]bool)
 	gameState.Grace = make(map[string]int)
-	gameState.AddrToPid = make(map[*net.UDPAddr]string)
+	gameState.AddrToPid = make(map[string]Client)
 	gameState.PidToNickname = make(map[string]string)
 	gameState.DroppedForever = make(map[string]bool)
 }
@@ -704,7 +710,7 @@ func main() {
 		panic("RTFM")
 	}
 	initializeGameState()
-	javaPort, leaderAddr, nickName := os.Args[1], os.Args[2], os.Args[6]
+	javaPort, leaderAddr, nickname := os.Args[1], os.Args[2], os.Args[6]
 	isLeader, err := strconv.ParseBool(os.Args[3])
 	checkError(err)
 	sendChan, recvChan := make(chan string, 1), make(chan string, 1)
@@ -753,11 +759,13 @@ func electNewLeader(killChan chan bool) {
 	broadcastMessage(conn, byt)
 	
 	for i:=0; i < len(gameState.AddrToPid); i++ {
-		buf,_, timeout := readFromUDPWithTimeout(conn, timeoutTime)
+		buf, raddr, timeout := readFromUDPWithTimeout(conn, timeoutTime)
 		//checkerror
 		dat := decodeMessage(buf)
-		pidString, _ := dat["pid"].(float64)
-		pid := int(pidString)
+		//pidString, _ := dat["pid"].(float64)
+		//pid := int(pidString)
+		fmt.Println(raddr.String())
+		pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()].pid)
 
 		if timeout {
 			break
