@@ -325,6 +325,10 @@ func isCollision(x, y int) bool {
  - once this is done, lobby session ends and monarch starts game.
 */
 func initLobby(conn *net.UDPConn) {
+	// LOBBY PHASE
+	// before the general main loop, wait for playerCount messages,
+	// this will tell me who I need to send roundStarts to.
+	
 	// start of new game
 	for {
 		// wait for message from some client
@@ -460,20 +464,32 @@ func broadcastMessage(conn *net.UDPConn, message []byte) {
 	}
 }
 
-// main leader function, approves moves of followers
-func leaderListener(leaderAddrString string) {
+
+func initiateLeader(leaderAddrString string) (conn *net.UDPConn) {
 	// Listen
 	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
 	checkError(err)
-	conn, err := net.ListenUDP("udp", leaderAddr)
-	defer conn.Close()
+	conn, err = net.ListenUDP("udp", leaderAddr)
 	checkError(err)
+	return
+}
+
+
+func newRound(conn *net.UDPConn) (roundMoves MovesMessage){
+	newRoundMessage := newRoundMessage()
+	broadcastMessage(conn, newRoundMessage)
+	logLeader("done sending round start messages.")
+	slideWindow()
+	roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: gameState.Positions, Round: gameState.Round}}
+	return
+}
+
+// main leader function, approves moves of followers
+func leaderListener(leaderAddrString string) {
+	conn := initiateLeader(leaderAddrString)
+	defer conn.Close()
 	// connBuf := bufio.NewReader(conn)
 	logLeader("Leader has started")
-
-	// LOBBY PHASE
-	// before the general main loop, wait for playerCount messages,
-	// this will tell me who I need to send roundStarts to.
 	initLobby(conn)
 
 	// MAIN GAME LOOP
@@ -483,13 +499,9 @@ func leaderListener(leaderAddrString string) {
 	for {
 		// if a new round is starting, let everyone connected to me know
 		if isNewRound {
-			newRoundMessage := newRoundMessage()
-			broadcastMessage(conn, newRoundMessage)
-			slideWindow()
-			roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: gameState.Positions, Round: gameState.Round}}
+			roundMoves = newRound(conn)
 			isNewRound = false
 			timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
-			logLeader("done sending round start messages.")
 		}
 		// read messages from followers and forward them
 		logLeader("Waiting to receive message from follower...")
