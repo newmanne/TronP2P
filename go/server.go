@@ -17,6 +17,7 @@ import (
 // GLOBAL VARS
 
 var gameState GameState
+var electionState = NORMAL
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
 var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new java move
@@ -41,6 +42,7 @@ type Move struct {
 type GameState struct {
 	Round          int
 	MyPid          int
+	MyPriority     int
 	GridWidth      int
 	GridHeight     int
 	Positions      []map[string]Move
@@ -106,8 +108,8 @@ type GameOverMessage struct {
 }
 
 type LeaderDeadMessage struct {
-	EventName string 'json:"eventName"'
-	Round int 'json:"round"'
+	EventName string `json:"eventName"`
+	Round int `json:"round"`
 }
 
 type ElectionState int
@@ -117,7 +119,7 @@ const (
 	QUORUM
 	NEWLEADER
 )
-
+/*
 // GLOBAL VARS
 
 var gameState GameState
@@ -128,7 +130,7 @@ var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new ja
 var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond // time for followers to respond
 var MAX_GRACE_PERIOD = 3                            // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = 0                 // out of 1000, fail rate for responses not to be received
-
+*/
 
 // UTILITY FUNCTIONS
 
@@ -200,9 +202,9 @@ func encodeMessage(message interface{}) []byte {
 	return val
 }
 
-func decodeMessage(message []byte) interface{} {
+func decodeMessage(message []byte) map[string]interface{} {
 	var dat map[string]interface{}
-	err := json.Unmarshal(buf, &dat)
+	err := json.Unmarshal(message, &dat)
 	checkError(err)
 	return dat
 }
@@ -215,6 +217,7 @@ func newRoundMessage() []byte {
 
 func parseMessage(buf []byte) (string, string, int) {
 	fmt.Println("Parsing the following message " + string(buf))
+	
 	dat := decodeMessage(buf)
 
 	fmt.Println("dat: ", dat)
@@ -443,7 +446,7 @@ func timeToRespond(timedout bool) bool {
 	}
 }
 
-func leaderBroadcast(conn *net.UDPConn, message []byte) {
+func broadcastMessage(conn *net.UDPConn, message []byte) {
 	for addr, pid := range gameState.AddrToPid {
 		_, err := conn.WriteToUDP(message, addr)
 		checkError(err)
@@ -555,7 +558,7 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	// Read response from leader
 	logClient("Waiting for leader to respond with game start details")
 
-	buf, _ = readFromUDP(conn)
+	buf, _ := readFromUDP(conn)
 	logClient("Received a game start response from the leader:" + string(buf))
 
 	// write back to channel with byte response (let java know to start)
@@ -567,6 +570,13 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	killChan := make(chan bool, 1)
 	for {
 		// read round start from leader
+		logClient("LALALALALALALALA " + strconv.Itoa(gameState.MyPid));
+		fmt.Printf("%d\n", len(gameState.AddrToPid));
+		for key, value := range gameState.AddrToPid {
+			fmt.Println("1")
+			fmt.Println(key)
+			fmt.Println(value)
+		}
 		buf, _, timeout := readFromUDPWithTimeout(conn, timeoutTime)
 		if timeout {
 			if electionState == NORMAL {
@@ -734,8 +744,8 @@ func electNewLeader(killChan chan bool) {
 	conn, err := net.ListenUDP("udp", newAddr)
 	checkError(err)
 	var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
-	var timeout bool
-	var buf []byte
+//	var timeout bool
+//	var buf []byte
 	var count = 0
 	var positive = 0
 
@@ -743,11 +753,16 @@ func electNewLeader(killChan chan bool) {
 	byt := encodeMessage(message)
 	broadcastMessage(conn, byt)
 	
-	for i:=0; i < len(gameState.AddrToPID); i++ {
-		buf, raddr, timeout := readFromUDPWithTimeout(conn, timeoutTime)
+	for i:=0; i < len(gameState.AddrToPid); i++ {
+		buf,raddr, timeout := readFromUDPWithTimeout(conn, timeoutTime)
+		pid,_ := strconv.Atoi(gameState.AddrToPid[raddr])
+		
+		//log(err)
+		log(strconv.Itoa(pid))
+		//checkerror
 		if timeout {
 			break
-		} else if gameState.AddrToPID[raddr] > gameState.MyPid {
+		} else if pid > gameState.MyPid {
 			electionState = NORMAL
 			return
 		} else {
