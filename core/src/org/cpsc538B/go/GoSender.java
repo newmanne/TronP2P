@@ -98,8 +98,9 @@ public class GoSender implements Disposable {
             while (goSocket.isConnected()) {
                 try {
                     // Note that all messages are delineated by lines
-                    final String message = goInputStream.readLine();
+                    String message = goInputStream.readLine();
                     Gdx.app.log(TronP2PGame.SERVER_TAG, "RECEIVED: " + message);
+
                     final JsonNode jsonNode = JSONUtils.getMapper().readTree(message);
                     final String name = jsonNode.get("eventName").asText();
                     final int round = jsonNode.get("round").asInt();

@@ -24,7 +24,7 @@ var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new ja
 var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5               // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{
-	"1": 10,
+	"1": 0,
 } // out of 1000, fail rate for responses not to be received
 
 // STRUCTURES
@@ -566,18 +566,13 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 
 	logClient("LOBBY PHASE IS OVER. ENTERING MAIN LOOP")
 	// MAIN GAME LOOP
-	var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 	killChan := make(chan bool, 1)
 	for {
+		
 		// read round start from leader
-		logClient("LALALALALALALALA " + strconv.Itoa(gameState.MyPid));
-		fmt.Printf("%d\n", len(gameState.AddrToPid));
-		for key, value := range gameState.AddrToPid {
-			fmt.Println("1")
-			fmt.Println(key)
-			fmt.Println(value)
-		}
+		var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 		buf, _, timeout := readFromUDPWithTimeout(conn, timeoutTime)
+
 		if timeout {
 			if electionState == NORMAL {
 				electionState = QUORUM
@@ -589,6 +584,7 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 			electionState = NORMAL
 			killChan <- true
 		}
+
 		
 		logClient("Got message " + string(buf) + " from leader, passing it to java")
 		recvChan <- string(buf)
@@ -599,7 +595,6 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 
 		// wait for message from java
 		message := <-sendChan
-
 		// write message to leader address
 		_, err = conn.WriteToUDP([]byte(message), leaderAddr)
 		checkError(err)
@@ -662,7 +657,6 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 		
 		logJava("Received: " + status)
 		checkError(err)
-
 		// send buf to leader channel
 		sendChan <- status
 
@@ -754,12 +748,12 @@ func electNewLeader(killChan chan bool) {
 	broadcastMessage(conn, byt)
 	
 	for i:=0; i < len(gameState.AddrToPid); i++ {
-		buf,raddr, timeout := readFromUDPWithTimeout(conn, timeoutTime)
-		pid,_ := strconv.Atoi(gameState.AddrToPid[raddr])
-		
-		//log(err)
-		log(strconv.Itoa(pid))
+		buf,_, timeout := readFromUDPWithTimeout(conn, timeoutTime)
 		//checkerror
+		dat := decodeMessage(buf)
+		pidString, _ := dat["pid"].(float64)
+		pid := int(pidString)
+
 		if timeout {
 			break
 		} else if pid > gameState.MyPid {
@@ -767,7 +761,6 @@ func electNewLeader(killChan chan bool) {
 			return
 		} else {
 			count++
-			dat := decodeMessage(buf)
 			roundString, _ := dat["round"].(float64)
 			round := int(roundString)
 			eventName := dat["eventName"].(string)
