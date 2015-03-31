@@ -130,7 +130,7 @@ var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new ja
 var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond // time for followers to respond
 var MAX_GRACE_PERIOD = 3                            // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = 0                 // out of 1000, fail rate for responses not to be received
-*/
+*/
 
 // UTILITY FUNCTIONS
 
@@ -448,7 +448,7 @@ func timeToRespond(timedout bool) bool {
 
 func broadcastMessage(conn *net.UDPConn, message []byte) {
 	for addr, pid := range gameState.AddrToPid {
-		_, err := conn.WriteToUDP(message, addr)
+		_, err := conn.WriteToUDP(message,n addr)
 		checkError(err)
 		logLeader("Sent message " + string(message) + " to player " + pid)
 	}
@@ -530,31 +530,33 @@ func leaderListener(leaderAddrString string) {
 	logLeader("My work here as leader is done. Goodbye.")
 }
 
-func goClient(sendChan chan string, recvChan chan string, leaderAddrString string, wg sync.WaitGroup, isLeader bool, nickname string) {
-	defer wg.Done()
 
+func initializeConnection(sendChan chan string, leaderAddrString, nickname string, isLeader bool) (conn *net.UDPConn, leaderAddr *net.UDPAddr) {
 	// Get a port for the go client to use
 	addr, err := net.ResolveUDPAddr("udp", "localhost:0")
 	checkError(err)
-	conn, err := net.ListenUDP("udp", addr)
-	defer conn.Close()
+	conn, err = net.ListenUDP("udp", addr)
 	checkError(err)
 	// Resolve the leader address
-	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
+	leaderAddr, err = net.ResolveUDPAddr("udp", leaderAddrString)
 	checkError(err)
-
 	// Write a message to the leader letting it know that I have started
 	logClient("Sending a hello message to the leader")
 	_, err = conn.WriteToUDP([]byte("JOIN:"+nickname), leaderAddr)
 	checkError(err)
-
 	if isLeader {
 		message := <-sendChan
 		logClient("Go client got START message. Sending to leader")
 		_, err = conn.WriteToUDP([]byte(message), leaderAddr)
 		checkError(err)
 	}
+	return
+}
 
+func goClient(sendChan chan string, recvChan chan string, leaderAddrString string, wg sync.WaitGroup, isLeader bool, nickname string) {
+	defer wg.Done()
+	conn, leaderAddr := initializeConnection(sendChan, leaderAddrString, nickname, isLeader)
+	defer conn.Close()
 	// Read response from leader
 	logClient("Waiting for leader to respond with game start details")
 
@@ -568,7 +570,6 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	// MAIN GAME LOOP
 	killChan := make(chan bool, 1)
 	for {
-		
 		// read round start from leader
 		var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 		buf, _, timeout := readFromUDPWithTimeout(conn, timeoutTime)
@@ -585,9 +586,9 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 			killChan <- true
 		}
 
-		
 		logClient("Got message " + string(buf) + " from leader, passing it to java")
 		recvChan <- string(buf)
+
 		if isGameOverMessage(string(buf)) {
 			logClient("Delivered a game over message. My work here is done. Goodbye")
 			break
@@ -596,7 +597,7 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 		// wait for message from java
 		message := <-sendChan
 		// write message to leader address
-		_, err = conn.WriteToUDP([]byte(message), leaderAddr)
+		_, err := conn.WriteToUDP([]byte(message), leaderAddr)
 		checkError(err)
 
 		// read response from leader
@@ -608,13 +609,19 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	logClient("My work here as a client is done. Goodbye")
 }
 
+func initializeJavaConnection(sendChan chan string, javaAddrString string) (conn net.Conn) {
+	logJava("Trying to connect to java on " + javaAddrString)
+	conn, err := net.Dial("tcp", javaAddrString)
+	checkError(err)
+	return
+}
+
 func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString string, wg sync.WaitGroup, isLeader bool) {
 	defer wg.Done()
 
-	logJava("Trying to connect to java on " + javaAddrString)
-	conn, err := net.Dial("tcp", javaAddrString)
+	conn := initializeJavaConnection(sendChan, javaAddrString)
 	defer conn.Close()
-	checkError(err)
+	
 	connBuf := bufio.NewReader(conn)
 
 	if isLeader {
@@ -632,7 +639,7 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 	reply := <-recvChan
 	logJava("reply " + reply)
 	conn.Write([]byte(reply + "\n"))
-	checkError(err)
+//	checkError(err)
 	logJava("Wrote game start message to java. Lobby phase over, entering main loop")
 
 	// MAIN LOOP
@@ -643,7 +650,6 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 
 		logJava("Sending the following message to java:" + message)
 		conn.Write([]byte(message + "\n"))
-		checkError(err)
 		logJava("Message has been sent to java")
 		if isGameOverMessage(message) {
 			logJava("A Game Over was sent to java. My work here is done. Goodbye")
@@ -667,6 +673,26 @@ func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString
 	}
 }
 
+func initializeGameState() {
+	var err error
+	// init vars
+	rand.Seed(time.Now().Unix())
+	gameState.Round = 1
+	gameState.GridWidth, err = strconv.Atoi(os.Args[4])
+	checkError(err)
+	gameState.GridHeight, err = strconv.Atoi(os.Args[5])
+	checkError(err)
+	gameState.Positions = make([]map[string]Move, MAX_ALLOWABLE_MISSED_MESSAGES)
+	for i := 0; i < len(gameState.Positions); i++ {
+		gameState.Positions[i] = make(map[string]Move)
+	}
+	gameState.Alive = make(map[string]bool)
+	gameState.Grace = make(map[string]int)
+	gameState.AddrToPid = make(map[*net.UDPAddr]string)
+	gameState.PidToNickname = make(map[string]string)
+	gameState.DroppedForever = make(map[string]bool)
+}
+
 func main() {
 	fmt.Println("Go process started")
 	if FOLLOWER_RESPONSE_TIME < MIN_GAME_SPEED {
@@ -677,37 +703,16 @@ func main() {
 	if len(os.Args) != 7 {
 		panic("RTFM")
 	}
-	javaPort := os.Args[1]
-	leaderAddr := os.Args[2]
-	isLeaderString := os.Args[3]
-	isLeader, err := strconv.ParseBool(isLeaderString)
+	initializeGameState()
+	javaPort, leaderAddr, nickName := os.Args[1], os.Args[2], os.Args[6]
+	isLeader, err := strconv.ParseBool(os.Args[3])
 	checkError(err)
-	gridWidth, err := strconv.Atoi(os.Args[4])
-	checkError(err)
-	gridHeight, err := strconv.Atoi(os.Args[5])
-	checkError(err)
-	nickname := os.Args[6]
-
-	// init vars
-	rand.Seed(time.Now().Unix())
-	gameState.Round = 1
-	gameState.GridWidth = gridWidth
-	gameState.GridHeight = gridHeight
-	gameState.Positions = make([]map[string]Move, MAX_ALLOWABLE_MISSED_MESSAGES)
-	for i := 0; i < len(gameState.Positions); i++ {
-		gameState.Positions[i] = make(map[string]Move)
-	}
-	gameState.Alive = make(map[string]bool)
-	gameState.Grace = make(map[string]int)
-	gameState.AddrToPid = make(map[*net.UDPAddr]string)
-	gameState.PidToNickname = make(map[string]string)
-	gameState.DroppedForever = make(map[string]bool)
 	sendChan, recvChan := make(chan string, 1), make(chan string, 1)
 
 	// if I am the leader, listen for rounds to confirm them
 	if isLeader {
 		go leaderListener(leaderAddr)
-		time.Sleep(100 * time.Millisecond) // stupid hack to make sure the leader is up befoe the client
+		time.Sleep(100 * time.Millisecond) // stupid hack to make sure the leader is up before the client
 	}
 
 	var wg sync.WaitGroup
