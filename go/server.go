@@ -223,7 +223,7 @@ func decodeMessage(message []byte) map[string]interface{} {
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
-	message := RoundStartMessage{MessageType: "game", EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
+	message := RoundStartMessage{MessageType: "roundstart", EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
 	return encodeMessage(message)
 }
 
@@ -285,7 +285,7 @@ func isGameOverMessage(message string) bool {
 }
 
 func startGameMessage(pid string, startingPositions map[string]Move) GameStartMessage {
-	return GameStartMessage{MessageType: "game", EventName: "gameStart", Round: gameState.Round, GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
+	return GameStartMessage{MessageType: "startgame", EventName: "gameStart", Round: gameState.Round, GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
 }
 
 func endGameMessage() GameOverMessage {
@@ -587,15 +587,16 @@ func initializeConnection(sendChan chan string, leaderAddrString, nickname strin
 	return
 }
 
-//maybe we don't need to define timeout outside. message needs to be defined outside to receive it though
-//argh, so many parameters. solvable someway? maybe a struct since we're always passing the same parameters to everything?
-func dealWithGameMessages(sendChan, recvChan chan string, messageChan chan []byte, leaderAddr *net.UDPAddr, conn *net.UDPConn ) {	
-	//need to interrupt it at some point
-	var buf []byte
+//NOTE maybe we don't need to define timeout outside. message needs to be defined outside to receive it though
+//NOTE argh, so many parameters. solvable someway? maybe a struct since we're always passing the same parameters to everything?
+func dealWithGameMessages(killChan chan bool, sendChan, recvChan chan string, messageChan, messageChan2 chan []byte, leaderAddr *net.UDPAddr, conn *net.UDPConn ) {	
+	//NOTE need to interrupt it at some point	
+//	var buf []byte
+//	var timedout bool
 	var timedout bool
-	killChan := make(chan bool, 1)
-	
+	var buf []byte
 	for {
+		//NOTE current timeout keeps running. im afraid that if a new leader is not elected in time it will trigger another election. mayne is solvable with an ID? not sure though
 		timeout := make(chan bool, 1)
 		go func () {
 			time.Sleep(FOLLOWER_RESPONSE_TIME)
@@ -613,19 +614,20 @@ func dealWithGameMessages(sendChan, recvChan chan string, messageChan chan []byt
 		
 		if timedout {
 			if electionState == NORMAL {
-				electionState = QUORUM			
-				go electNewLeader(killChan)
+				electionState = QUORUM
+				go initElection(killChan, messageChan2)
 			}
 			continue
 		} else if electionState == QUORUM {
 			electionState = NORMAL
+			//BUG this is currently ineffective since killchan is not used inside
 			killChan <- true
 		}
 		
 		logClient("Got message " + string(buf) + " from leader, passing it to java")
 		recvChan <- string(buf)
 
-		if getMessageType(buf) == "game" {
+		if getMessageType(buf) == "roundstart" {
 			// wait for message from java
 			message := <-sendChan
 			// write message to leader address
@@ -634,7 +636,6 @@ func dealWithGameMessages(sendChan, recvChan chan string, messageChan chan []byt
 		}
 	}
 }
-
 
 func goClient(sendChan chan string, recvChan chan string, leaderAddrString string, wg sync.WaitGroup, isLeader bool, nickname string) {
 	defer wg.Done()
@@ -652,16 +653,16 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	logClient("LOBBY PHASE IS OVER. ENTERING MAIN LOOP")
 	// MAIN GAME LOOP
 	messageChan := make(chan []byte, 1)
-
-	go dealWithGameMessages(sendChan, recvChan, messageChan, leaderAddr, conn)
+	//TODO find a better name
+	messageChan2 := make(chan []byte, 1)
+	killChan := make(chan bool, 1)
+	go dealWithGameMessages(killChan, sendChan, recvChan, messageChan, messageChan2, leaderAddr, conn)
 	for {
 		// read round start from leader
-		//var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
-		//buf, _, timeout := readFromUDPWithTimeout(conn, timeoutTime)
-		buf, _ := readFromUDP(conn)
+		buf, raddr := readFromUDP(conn)
 		
 		switch getMessageType(buf) {
-		case "game":
+		case "roundstart":
 			messageChan <- buf
 			break;
 		case "moves":
@@ -672,9 +673,20 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 			//BUG currently not functioning, need to break out of the loop in someway.
 			//a bool tag should work, but its ugly
 			break;
-		case "leader":
-			
+		case "checkleader":
+			pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()].pid)
+			if electionState == QUORUM && pid > gameState.MyPid {
+				electionState = NORMAL
+				//BUG this is currently ineffective since killchan is not used inside
+				killChan <- true
+			} else {
+				//TODO answer back
+			}
 			break;
+		case "leaderdead":
+			messageChan2 <- buf
+		case "leaderalive":
+			messageChan2 <- buf
 		default:
 			panic("Cannot understdand message type")
 		}
@@ -810,52 +822,46 @@ func checkError(err error) {
 	}
 }
 
-func electNewLeader(killChan chan bool) {
+func initElection(killChan chan bool, messageChan chan []byte) {
 	newAddr, err := net.ResolveUDPAddr("udp", ":0")
 	checkError(err)
 	conn, err := net.ListenUDP("udp", newAddr)
 	checkError(err)
-	var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
-//	var timeout bool
-//	var buf []byte
+	var buf []byte
 	var count = 0
 	var positive = 0
 
 	message := LeaderDeadMessage{MessageType: "leader", EventName: "check", Round: gameState.Round}
 	byt := encodeMessage(message)
 	broadcastMessage(conn, byt)
-	
-	for i:=0; i < len(gameState.AddrToPid); i++ {
-		buf, raddr, timeout := readFromUDPWithTimeout(conn, timeoutTime)
-		//checkerror
-		dat := decodeMessage(buf)
-		//pidString, _ := dat["pid"].(float64)
-		//pid := int(pidString)
-		fmt.Println(raddr.String())
-		pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()].pid)
 
-		if timeout {
+	timeout := make(chan bool, 1)
+	timedout := false
+
+	for !timedout {
+		go func() {
+			//NOTE this should be decreased maybe?
+			time.Sleep(FOLLOWER_RESPONSE_TIME)
+			timeout <- true
+		}()
+
+		select {
+		case buf = <- messageChan:
 			break
-		} else if pid > gameState.MyPid {
-			electionState = NORMAL
-			return
-		} else {
-			count++
+		case timedout = <- timeout:
+			break
+		}
+		dat := decodeMessage(buf)
+		messageType, _ := dat["messagetype"].(string)
+		count ++;
+		if messageType == "leaderdead" {
 			roundString, _ := dat["round"].(float64)
 			round := int(roundString)
-			eventName := dat["eventName"].(string)
 			if round >= gameState.Round {
-				if eventName == "dead" {
-					positive++
-				} else if eventName == "check" /*&& is before me in the list*/ {
-					return //maybe clean up?  so to avoid late messages. might try to close connection
-				}
-			} else {
-				//breaK? not sure, probably better not
+				positive++
 			}
-		}
+		}		
 	}
-
 	if positive <  count/2 {
 		electionState = NORMAL
 		return
