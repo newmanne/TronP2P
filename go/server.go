@@ -64,23 +64,27 @@ type RoundStart struct {
 }
 
 type RoundStartMessage struct {
+	MessageType string `json:"messageType"`
 	EventName  string `json:"eventName"`
 	Round      int    `json:"round"`
 	RoundStart `json:"roundStart"`
 }
 
 type MyMoveMessage struct {
+	MessageType string `json:"messageType"`
 	EventName string `json:"eventName"`
 	Round     int    `json:"round"`
 	MyMove    `json:"myMove"`
 }
 
 type MyDeathMessage struct {
+	MessageType string `json:"messageType"`
 	EventName string `json:"eventName"`
 	Round     int    `json:"round"`
 }
 
 type MovesMessage struct {
+	MessageType string `json:"messageType"`
 	EventName string `json:"eventName"`
 	Round     int    `json:"round"`
 	Moves     `json:"moves"`
@@ -98,6 +102,7 @@ type GameStart struct {
 }
 
 type GameStartMessage struct {
+	MessageType string `json:"messageType"`
 	EventName string `json:"eventName"`
 	Round     int    `json:"round"`
 	GameStart `json:"gameStart"`
@@ -108,11 +113,13 @@ type GameOver struct {
 }
 
 type GameOverMessage struct {
+	MessageType string `json:"messageType"`
 	EventName string `json:"eventName"`
 	GameOver  `json:"gameOver"`
 }
 
 type LeaderDeadMessage struct {
+	MessageType string `json:"messageType"`
 	EventName string `json:"eventName"`
 	Round int `json:"round"`
 }
@@ -216,8 +223,17 @@ func decodeMessage(message []byte) map[string]interface{} {
 
 func newRoundMessage() []byte {
 	gameState.Round += 1
-	message := RoundStartMessage{EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
+	message := RoundStartMessage{MessageType: "game", EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
 	return encodeMessage(message)
+}
+
+func getMessageType(buf []byte) (messageType string) {
+	fmt.Println(buf)
+	dat := decodeMessage(buf)
+	fmt.Println(dat)
+	messageType = dat["messageType"].(string)
+	fmt.Println(messageType)
+	return
 }
 
 func parseMessage(buf []byte) (string, string, int) {
@@ -269,11 +285,11 @@ func isGameOverMessage(message string) bool {
 }
 
 func startGameMessage(pid string, startingPositions map[string]Move) GameStartMessage {
-	return GameStartMessage{EventName: "gameStart", Round: gameState.Round, GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
+	return GameStartMessage{MessageType: "game", EventName: "gameStart", Round: gameState.Round, GameStart: GameStart{Pid: pid, StartingPositions: startingPositions, Nicknames: gameState.PidToNickname}}
 }
 
 func endGameMessage() GameOverMessage {
-	return GameOverMessage{EventName: "gameOver", GameOver: GameOver{PidsInOrderOfDeath: gameState.Finish}}
+	return GameOverMessage{MessageType: "gameover", EventName: "gameOver", GameOver: GameOver{PidsInOrderOfDeath: gameState.Finish}}
 }
 
 func killPlayer(pid string) {
@@ -480,7 +496,7 @@ func newRound(conn *net.UDPConn) (roundMoves MovesMessage){
 	broadcastMessage(conn, newRoundMessage)
 	logLeader("done sending round start messages.")
 	slideWindow()
-	roundMoves = MovesMessage{EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: gameState.Positions, Round: gameState.Round}}
+	roundMoves = MovesMessage{MessageType: "moves", EventName: "moves", Round: gameState.Round, Moves: Moves{Moves: gameState.Positions, Round: gameState.Round}}
 	return
 }
 
@@ -571,6 +587,55 @@ func initializeConnection(sendChan chan string, leaderAddrString, nickname strin
 	return
 }
 
+//maybe we don't need to define timeout outside. message needs to be defined outside to receive it though
+//argh, so many parameters. solvable someway? maybe a struct since we're always passing the same parameters to everything?
+func dealWithGameMessages(sendChan, recvChan chan string, messageChan chan []byte, leaderAddr *net.UDPAddr, conn *net.UDPConn ) {	
+	//need to interrupt it at some point
+	var buf []byte
+	var timedout bool
+	killChan := make(chan bool, 1)
+	
+	for {
+		timeout := make(chan bool, 1)
+		go func () {
+			time.Sleep(FOLLOWER_RESPONSE_TIME)
+			fmt.Println("TIMEOUT");
+			timeout <- true
+		}()
+		select {
+		case buf = <- messageChan:
+			timedout = false;
+			break
+		case <-timeout:
+			timedout = true;
+			break
+		}
+		
+		if timedout {
+			if electionState == NORMAL {
+				electionState = QUORUM			
+				go electNewLeader(killChan)
+			}
+			continue
+		} else if electionState == QUORUM {
+			electionState = NORMAL
+			killChan <- true
+		}
+		
+		logClient("Got message " + string(buf) + " from leader, passing it to java")
+		recvChan <- string(buf)
+
+		if getMessageType(buf) == "game" {
+			// wait for message from java
+			message := <-sendChan
+			// write message to leader address
+			_, err := conn.WriteToUDP([]byte(message), leaderAddr)
+			checkError(err)
+		}
+	}
+}
+
+
 func goClient(sendChan chan string, recvChan chan string, leaderAddrString string, wg sync.WaitGroup, isLeader bool, nickname string) {
 	defer wg.Done()
 	conn, leaderAddr := initializeConnection(sendChan, leaderAddrString, nickname, isLeader)
@@ -586,43 +651,33 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 
 	logClient("LOBBY PHASE IS OVER. ENTERING MAIN LOOP")
 	// MAIN GAME LOOP
-	killChan := make(chan bool, 1)
+	messageChan := make(chan []byte, 1)
+
+	go dealWithGameMessages(sendChan, recvChan, messageChan, leaderAddr, conn)
 	for {
 		// read round start from leader
-		var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
-		buf, _, timeout := readFromUDPWithTimeout(conn, timeoutTime)
-
-		if timeout {
-			if electionState == NORMAL {
-				electionState = QUORUM
-				
-				go electNewLeader(killChan)
-			}
-			continue
-		} else if electionState == QUORUM {
-			electionState = NORMAL
-			killChan <- true
-		}
-
-		logClient("Got message " + string(buf) + " from leader, passing it to java")
-		recvChan <- string(buf)
-
-		if isGameOverMessage(string(buf)) {
+		//var timeoutTime = time.Now().Add(FOLLOWER_RESPONSE_TIME)
+		//buf, _, timeout := readFromUDPWithTimeout(conn, timeoutTime)
+		buf, _ := readFromUDP(conn)
+		
+		switch getMessageType(buf) {
+		case "game":
+			messageChan <- buf
+			break;
+		case "moves":
+			messageChan <- buf
+			break;
+		case "gameover":
 			logClient("Delivered a game over message. My work here is done. Goodbye")
-			break
+			//BUG currently not functioning, need to break out of the loop in someway.
+			//a bool tag should work, but its ugly
+			break;
+		case "leader":
+			
+			break;
+		default:
+			panic("Cannot understdand message type")
 		}
-
-		// wait for message from java
-		message := <-sendChan
-		// write message to leader address
-		_, err := conn.WriteToUDP([]byte(message), leaderAddr)
-		checkError(err)
-
-		// read response from leader
-		buf, _ = readFromUDP(conn)
-
-		// write back to channel with byte response
-		recvChan <- string(buf)
 	}
 	logClient("My work here as a client is done. Goodbye")
 }
@@ -766,7 +821,7 @@ func electNewLeader(killChan chan bool) {
 	var count = 0
 	var positive = 0
 
-	message := LeaderDeadMessage{EventName: "check", Round: gameState.Round}
+	message := LeaderDeadMessage{MessageType: "leader", EventName: "check", Round: gameState.Round}
 	byt := encodeMessage(message)
 	broadcastMessage(conn, byt)
 	
