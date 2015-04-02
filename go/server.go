@@ -481,7 +481,7 @@ func broadcastMessage(conn *net.UDPConn, message []byte) {
 }
 
 
-func initiateLeader(leaderAddrString string) (conn *net.UDPConn) {
+func initializeLeader(leaderAddrString string) (conn *net.UDPConn) {
 	// Listen
 	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
 	checkError(err)
@@ -501,13 +501,11 @@ func newRound(conn *net.UDPConn) (roundMoves MovesMessage){
 }
 
 // main leader function, approves moves of followers
-func leaderListener(leaderAddrString string) {
-	conn := initiateLeader(leaderAddrString)
+func leaderListener(conn *net.UDPConn) {
+	//conn := initializeLeader(leaderAddr)
+	//logLeader("Leader has started")
+	//initLobby(conn)
 	defer conn.Close()
-	// connBuf := bufio.NewReader(conn)
-	logLeader("Leader has started")
-	initLobby(conn)
-
 	// MAIN GAME LOOP
 	isNewRound := true
 	var roundMoves MovesMessage
@@ -615,7 +613,7 @@ func dealWithGameMessages(killChan chan bool, sendChan, recvChan chan string, me
 		if timedout {
 			if electionState == NORMAL {
 				electionState = QUORUM
-				go initElection(killChan, messageChan2)
+				go initElection(conn, killChan, messageChan2)
 			}
 			continue
 		} else if electionState == QUORUM {
@@ -665,6 +663,8 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 		buf, raddr := readFromUDP(conn)
 
 		//NOTE might be worth to decode the message it and pass it decoded? not sure with java after though
+		//NOTE might be worth to check the roundmessage here, we have a bunch of code duplication
+		//NOTE I'm considering extracting checkleader code to another method
 		switch getMessageType(buf) {
 		case "roundstart":
 			messageChan <- buf
@@ -677,6 +677,15 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 			//BUG currently not functioning, need to break out of the loop in someway.
 			//a bool tag should work, but its ugly
 			break;
+		case "newLeader":
+			dat := decodeMessage(buf)
+			roundString, _ := dat["round"].(float64)
+			round := int(roundString)
+			if gameState.Round  > round {
+				break;
+			} else {
+				leaderAddr = raddr
+			}
 		case "checkleader":
 			dat := decodeMessage(buf)
 			roundString, _ := dat["round"].(float64)
@@ -810,7 +819,12 @@ func main() {
 
 	// if I am the leader, listen for rounds to confirm them
 	if isLeader {
-		go leaderListener(leaderAddr)
+		go func() {
+			conn := initializeLeader(leaderAddr)
+			logLeader("Leader has started")
+			initLobby(conn)
+			go leaderListener(conn)
+		}()
 		time.Sleep(100 * time.Millisecond) // stupid hack to make sure the leader is up before the client
 	}
 
@@ -836,11 +850,7 @@ func checkError(err error) {
 	}
 }
 
-func initElection(killChan chan bool, messageChan chan []byte) {
-	newAddr, err := net.ResolveUDPAddr("udp", ":0")
-	checkError(err)
-	conn, err := net.ListenUDP("udp", newAddr)
-	checkError(err)
+func initElection(conn *net.UDPConn, killChan chan bool, messageChan chan []byte) {
 	var buf []byte
 	var count = 0
 	var positive = 0
@@ -886,4 +896,10 @@ func initElection(killChan chan bool, messageChan chan []byte) {
 	electionState = NEWLEADER
 
 	/*elect leader */
+	newLeaderConn := initializeLeader(":0")
+	message = LeaderElectionMessage{MessageType: "newleader", Round: gameState.Round}
+	byt = encodeMessage(message)
+	broadcastMessage(newLeaderConn, byt)
+	go leaderListener(newLeaderConn)
+	electionState = NORMAL
 }
