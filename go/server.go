@@ -852,8 +852,8 @@ func checkError(err error) {
 
 func initElection(conn *net.UDPConn, killChan chan bool, messageChan chan []byte) {
 	var buf []byte
-	var count = 0
-	var positive = 0
+	var count = 1
+	var positive = 1
 
 	message := LeaderElectionMessage{MessageType: "checkleader", Round: gameState.Round}
 	byt := encodeMessage(message)
@@ -888,7 +888,7 @@ func initElection(conn *net.UDPConn, killChan chan bool, messageChan chan []byte
 			}
 		}		
 	}
-	if positive <  count/2 {
+	if positive <=  count/2 {
 		electionState = NORMAL
 		return
 	}
