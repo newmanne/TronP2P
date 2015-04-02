@@ -1,5 +1,5 @@
 package main
-
+//BUG we are not setting this
 import (
 	"bufio"
 	"bytes"
@@ -118,7 +118,7 @@ type GameOverMessage struct {
 	GameOver  `json:"gameOver"`
 }
 
-type LeaderDeadMessage struct {
+type LeaderElectionMessage struct {
 	MessageType string `json:"messageType"`
 	EventName string `json:"eventName"`
 	Round int `json:"round"`
@@ -222,7 +222,7 @@ func decodeMessage(message []byte) map[string]interface{} {
 }
 
 func newRoundMessage() []byte {
-	gameState.Round += 1
+	gameState.Round++
 	message := RoundStartMessage{MessageType: "roundstart", EventName: "roundStart", Round: gameState.Round, RoundStart: RoundStart{Round: gameState.Round}}
 	return encodeMessage(message)
 }
@@ -628,6 +628,9 @@ func dealWithGameMessages(killChan chan bool, sendChan, recvChan chan string, me
 		recvChan <- string(buf)
 
 		if getMessageType(buf) == "roundstart" {
+			dat := decodeMessage(buf)
+			roundString, _ := dat["round"].(float64)
+			gameState.Round = int(roundString)
 			// wait for message from java
 			message := <-sendChan
 			// write message to leader address
@@ -660,7 +663,8 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	for {
 		// read round start from leader
 		buf, raddr := readFromUDP(conn)
-		
+
+		//NOTE might be worth to decode the message it and pass it decoded? not sure with java after though
 		switch getMessageType(buf) {
 		case "roundstart":
 			messageChan <- buf
@@ -674,13 +678,23 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 			//a bool tag should work, but its ugly
 			break;
 		case "checkleader":
+			dat := decodeMessage(buf)
+			roundString, _ := dat["round"].(float64)
+			round := int(roundString)
+
+			if gameState.Round > round {
+				_, err := conn.WriteToUDP(encodeMessage(LeaderElectionMessage{MessageType: "leaderalive", Round: gameState.Round}), raddr)
+				checkError(err)
+				break
+			}
 			pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()].pid)
 			if electionState == QUORUM && pid > gameState.MyPid {
 				electionState = NORMAL
 				//BUG this is currently ineffective since killchan is not used inside
 				killChan <- true
 			} else {
-				//TODO answer back
+				_, err := conn.WriteToUDP(encodeMessage(LeaderElectionMessage{MessageType: "leaderdead", Round: gameState.Round}), raddr)
+				checkError(err)
 			}
 			break;
 		case "leaderdead":
@@ -831,7 +845,7 @@ func initElection(killChan chan bool, messageChan chan []byte) {
 	var count = 0
 	var positive = 0
 
-	message := LeaderDeadMessage{MessageType: "leader", EventName: "check", Round: gameState.Round}
+	message := LeaderElectionMessage{MessageType: "checkleader", Round: gameState.Round}
 	byt := encodeMessage(message)
 	broadcastMessage(conn, byt)
 
@@ -844,11 +858,13 @@ func initElection(killChan chan bool, messageChan chan []byte) {
 			time.Sleep(FOLLOWER_RESPONSE_TIME)
 			timeout <- true
 		}()
-
 		select {
 		case buf = <- messageChan:
 			break
 		case timedout = <- timeout:
+			break
+		}
+		if timedout {
 			break
 		}
 		dat := decodeMessage(buf)
