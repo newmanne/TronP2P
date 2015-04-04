@@ -591,30 +591,33 @@ func dealWithGameMessages(killChan chan bool, sendChan, recvChan chan string, me
 	//NOTE need to interrupt it at some point	
 //	var buf []byte
 //	var timedout bool
-	var timedout bool
 	var buf []byte
 	for {
+		timedout := false
 		//NOTE current timeout keeps running. im afraid that if a new leader is not elected in time it will trigger another election. mayne is solvable with an ID? not sure though
-		timeout := make(chan bool, 1)
+		//timeout := make(chan bool, 1)
 		go func () {
 			time.Sleep(FOLLOWER_RESPONSE_TIME)
 			fmt.Println("TIMEOUT");
-			timeout <- true
-		}()
-		select {
-		case buf = <- messageChan:
-			timedout = false;
-			break
-		case <-timeout:
 			timedout = true;
-			break
-		}
+			//timeout <- true
+		}()
+		//select {
+			//case
+		buf = <- messageChan
+			//timedout = false;
+			//break
+		//case <-timeout:
+			//timedout = true;
+			//break
+		//}
 		
 		if timedout {
 			if electionState == NORMAL {
 				electionState = QUORUM
 				go initElection(conn, killChan, messageChan2)
 			}
+			timedout = false
 			continue
 		} else if electionState == QUORUM {
 			electionState = NORMAL
@@ -646,7 +649,7 @@ func goClient(sendChan chan string, recvChan chan string, leaderAddrString strin
 	logClient("Waiting for leader to respond with game start details")
 
 	buf, _ := readFromUDP(conn)
-	logClient("Received a game start response from the leader:" + string(buf))
+logClient("Received a game start response from the leader:" + string(buf))
 
 	// write back to channel with byte response (let java know to start)
 	recvChan <- string(buf)
@@ -859,21 +862,23 @@ func initElection(conn *net.UDPConn, killChan chan bool, messageChan chan []byte
 	byt := encodeMessage(message)
 	broadcastMessage(conn, byt)
 
-	timeout := make(chan bool, 1)
+	//timeout := make(chan bool, 1)
 	timedout := false
 
 	for !timedout {
 		go func() {
 			//NOTE this should be decreased maybe?
 			time.Sleep(FOLLOWER_RESPONSE_TIME)
-			timeout <- true
+			//timeout <- true
+			timedout = true
 		}()
-		select {
-		case buf = <- messageChan:
-			break
-		case timedout = <- timeout:
-			break
-		}
+		//select {
+		//case
+		buf = <- messageChan
+		//break
+		//case timedout = <- timeout:
+		//break
+		//}
 		if timedout {
 			break
 		}
