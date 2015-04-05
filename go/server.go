@@ -331,7 +331,7 @@ func CreateInitPlayerPosition() Move {
 		X: randomInt(1, gameState.GridWidth-2),
 		Y: randomInt(1, gameState.GridHeight-2),
 		Direction: direction,
-	}
+		}
 }
 
 func registerNewPlayer(raddr *net.UDPAddr, buf []byte) {
@@ -550,11 +550,11 @@ func surviveFollowerResponseInjectedFailure(pid string) bool {
 	return true
 }
 
-func timeToRespond(timedout bool) bool {
+func timeToRespond() bool {
 	recvCount := len(getCurrentMoveMap())
 	totalNeeded := len(gameState.AddrToPid) - len(gameState.DroppedForever)
 	logLeader("received " + strconv.Itoa(recvCount) + "/" + strconv.Itoa(totalNeeded) + " messages")
-	if recvCount == totalNeeded || timedout {
+	if recvCount == totalNeeded {
 		// count missed messages for those who did not respond, or reset
 		for pid, alive := range gameState.Alive {
 			_, responded := getCurrentMoveMap()[pid]
@@ -575,6 +575,9 @@ func timeToRespond(timedout bool) bool {
 
 //TODO No comment.
 func isCollision(x, y int) bool {
+	if COLLISION_IS_DEATH {
+		return false
+	}
 	return false
 }
 
@@ -620,53 +623,48 @@ func main() {
 
 func leaderListener(conn *net.UDPConn) {
 	defer conn.Close()
-	// MAIN GAME LOOP
-	isNewRound := true
 	var roundMoves MovesMessage
 	var timeoutTimeForRound time.Time
 	for {
-		// if a new round is starting, let everyone connected to me know
-		if isNewRound {
-			roundMoves = newRound(conn)
-			isNewRound = false
-			timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
-		}
-		// read messages from followers and forward them
-		logLeader("Waiting to receive message from follower...")
-		buf, _, timedout := readFromUDPWithTimeout(conn, timeoutTimeForRound)
-		if !timedout {
+		roundMoves = newRound(conn)
+		timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
+		for {
+			logLeader("Waiting to receive message from follower...")
+			buf, _, timedout := readFromUDPWithTimeout(conn, timeoutTimeForRound)
+			if timedout {
+				break
+			}
 			direction, pid, round := parseMessage(buf)
 			if round == gameState.Round && !gameState.DroppedForever[pid] {
-				received := surviveFollowerResponseInjectedFailure(pid)
-				if received {
+				if surviveFollowerResponseInjectedFailure(pid) {
 					move := makeMove(direction, pid)
-					if COLLISION_IS_DEATH && isCollision(move.X, move.Y) {
-						logLeader("Player " + pid + " is dead")
+					if isCollision(move.X, move.Y) {
 						killPlayer(pid)
 					}
 					getCurrentMoveMap()[pid] = move
-					logLeader("Received move message " + string(encodeMessage(move)) + " from player " + pid)
+					logLeader("Received move message " + string(encodeMessage(move)) +
+						" from player " + pid)
+					if timeToRespond() {
+						break
+					}
 				}
 			} else {
-				logLeader("Recieved a move message from " + pid + " from an old round " + strconv.Itoa(round) +
-					" but current round is " + strconv.Itoa(gameState.Round) + ". Ignoring message")
+				logLeader("Recieved a move message from " + pid + " from an old round " +
+					strconv.Itoa(round) +	" but current round is " +
+					strconv.Itoa(gameState.Round) + ". Ignoring message")
 			}
-		} else {
-			logLeader("Timed out")
+			
 		}
 		if gameOver() {
 			break
 		}
+		byt := encodeMessage(roundMoves)
+		broadcastMessage(conn, byt)
 
-		if timeToRespond(timedout) {
-			byt := encodeMessage(roundMoves)
-			broadcastMessage(conn, byt)
-			isNewRound = true
-		}
 	}
-	broadcastMessage(conn, encodeMessage(endGameMessage()))
-	logLeader("Closing leader")
 }
+
+
 
 //NOTE maybe we don't need to define timeout outside. message needs to be defined outside to receive it though
 //NOTE argh, so many parameters. solvable someway? maybe a struct since we're always passing the same parameters to everything?
