@@ -176,6 +176,7 @@ public class GoSender implements Disposable {
         String pid;
         Map<String, PositionAndDirection> startingPositions;
         Map<String, String> nicknames;
+	Map<String, String> addresses;
     }
 
 
