@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-//	"bytes"
+	//	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -19,9 +19,9 @@ var addressState AddressState
 var electionState = NORMAL
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var MIN_GAME_SPEED = 50 * time.Millisecond          // time between every new java move
-var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond // time for followers to respond
-var MAX_ALLOWABLE_MISSED_MESSAGES = 5               // max number of consecutive missed messages
+var MIN_GAME_SPEED = (1000 / 60) * time.Millisecond      // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond      // time for followers to respond
+var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
 
 // STRUCTURES
@@ -42,6 +42,7 @@ type GameState struct {
 	MyPriority     int
 	GridWidth      int
 	GridHeight     int
+	Grid           [][]int
 	Nickname       string
 	Positions      []map[string]Move
 	Alive          map[string]bool
@@ -54,15 +55,15 @@ type GameState struct {
 }
 
 type AddressState struct {
-	javaAddr string
-	leaderAddr string
-	leaderUDPAddr *net.UDPAddr
-	isLeader bool
-	goConnection *net.UDPConn
+	javaAddr       string
+	leaderAddr     string
+	leaderUDPAddr  *net.UDPAddr
+	isLeader       bool
+	goConnection   *net.UDPConn
 	javaConnection net.Conn
-	connBuf *bufio.Reader
-	sendChan chan []byte
-	recvChan chan []byte
+	connBuf        *bufio.Reader
+	sendChan       chan []byte
+	recvChan       chan []byte
 }
 
 type RoundStart struct {
@@ -71,29 +72,29 @@ type RoundStart struct {
 
 type RoundStartMessage struct {
 	MessageType string `json:"messageType"`
-	EventName  string `json:"eventName"`
-	Round      int    `json:"round"`
-	RoundStart `json:"roundStart"`
+	EventName   string `json:"eventName"`
+	Round       int    `json:"round"`
+	RoundStart  `json:"roundStart"`
 }
 
 type MyMoveMessage struct {
 	MessageType string `json:"messageType"`
-	EventName string `json:"eventName"`
-	Round     int    `json:"round"`
-	MyMove    `json:"myMove"`
+	EventName   string `json:"eventName"`
+	Round       int    `json:"round"`
+	MyMove      `json:"myMove"`
 }
 
 type MyDeathMessage struct {
 	MessageType string `json:"messageType"`
-	EventName string `json:"eventName"`
-	Round     int    `json:"round"`
+	EventName   string `json:"eventName"`
+	Round       int    `json:"round"`
 }
 
 type MovesMessage struct {
 	MessageType string `json:"messageType"`
-	EventName string `json:"eventName"`
-	Round     int    `json:"round"`
-	Moves     `json:"moves"`
+	EventName   string `json:"eventName"`
+	Round       int    `json:"round"`
+	Moves       `json:"moves"`
 }
 
 type Moves struct {
@@ -105,14 +106,14 @@ type GameStart struct {
 	Pid               string            `json:"pid"`
 	StartingPositions map[string]Move   `json:"startingPositions"`
 	Nicknames         map[string]string `json:"nicknames"`
-	Addresses map[string]string `json:"addresses"`
+	Addresses         map[string]string `json:"addresses"`
 }
 
 type GameStartMessage struct {
 	MessageType string `json:"messageType"`
-	EventName string `json:"eventName"`
-	Round     int    `json:"round"`
-	GameStart `json:"gameStart"`
+	EventName   string `json:"eventName"`
+	Round       int    `json:"round"`
+	GameStart   `json:"gameStart"`
 }
 
 type GameOver struct {
@@ -121,14 +122,14 @@ type GameOver struct {
 
 type GameOverMessage struct {
 	MessageType string `json:"messageType"`
-	EventName string `json:"eventName"`
-	GameOver  `json:"gameOver"`
+	EventName   string `json:"eventName"`
+	GameOver    `json:"gameOver"`
 }
 
 type LeaderElectionMessage struct {
 	MessageType string `json:"messageType"`
-	EventName string `json:"eventName"`
-	Round int `json:"round"`
+	EventName   string `json:"eventName"`
+	Round       int    `json:"round"`
 }
 
 type ElectionState int
@@ -141,7 +142,7 @@ const (
 
 /*
 * READ FROM UDP
-*/
+ */
 
 func readFromUDPWithTimeout(conn *net.UDPConn, timeoutTime time.Time) ([]byte, *net.UDPAddr, bool) {
 	buf := make([]byte, 4096)
@@ -169,7 +170,7 @@ func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
 
 /*
 * MATH UTILITIES
-*/
+ */
 
 func randomInt(min, max int) int {
 	return rand.Intn(max-min) + min
@@ -193,7 +194,7 @@ func min(a, b int) int {
 
 /*
 * LOG UTILITIES
-*/
+ */
 
 func log(message string) {
 	fmt.Println(message)
@@ -213,7 +214,7 @@ func logClient(message string) {
 
 /*
 * MESSAGE UTILITIES
-*/
+ */
 
 func encodeMessage(message interface{}) []byte {
 	val, e := json.Marshal(message)
@@ -230,7 +231,7 @@ func decodeMessage(message []byte) map[string]interface{} {
 
 func parseMessage(buf []byte) (string, string, int) {
 	fmt.Println("Parsing the following message " + string(buf))
-	
+
 	dat := decodeMessage(buf)
 
 	fmt.Println("dat: ", dat)
@@ -266,17 +267,16 @@ func broadcastMessage(conn *net.UDPConn, message []byte) {
 	}
 }
 
-
 /*
 * MESSAGE CONSTRUCTORS
-*/
+ */
 
 func newRoundMessage() []byte {
 	gameState.Round++
 	message := RoundStartMessage{
 		MessageType: "roundstart",
-		EventName: "roundStart",
-		Round: gameState.Round,
+		EventName:   "roundStart",
+		Round:       gameState.Round,
 		RoundStart: RoundStart{
 			Round: gameState.Round,
 		},
@@ -287,13 +287,13 @@ func newRoundMessage() []byte {
 func startGameMessage(pid string, startingPositions map[string]Move) GameStartMessage {
 	return GameStartMessage{
 		MessageType: "startgame",
-		EventName: "gameStart",
-		Round: gameState.Round,
+		EventName:   "gameStart",
+		Round:       gameState.Round,
 		GameStart: GameStart{
-			Pid: pid,
+			Pid:               pid,
 			StartingPositions: startingPositions,
-			Nicknames: gameState.PidToNickname,
-			Addresses: gameState.AddrToPid,
+			Nicknames:         gameState.PidToNickname,
+			Addresses:         gameState.AddrToPid,
 		},
 	}
 }
@@ -301,22 +301,22 @@ func startGameMessage(pid string, startingPositions map[string]Move) GameStartMe
 func endGameMessage() GameOverMessage {
 	return GameOverMessage{
 		MessageType: "gameover",
-		EventName: "gameOver",
+		EventName:   "gameOver",
 		GameOver: GameOver{
 			PidsInOrderOfDeath: gameState.Finish,
 		},
 	}
 }
 
-func newRound(conn *net.UDPConn) (roundMoves MovesMessage){
+func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
 	newRoundMessage := newRoundMessage()
 	broadcastMessage(conn, newRoundMessage)
 	logLeader("done sending round start messages.")
 	slideWindow()
 	roundMoves = MovesMessage{
 		MessageType: "moves",
-		EventName: "moves",
-		Round: gameState.Round,
+		EventName:   "moves",
+		Round:       gameState.Round,
 		Moves: Moves{
 			Moves: gameState.Positions,
 			Round: gameState.Round,
@@ -327,7 +327,7 @@ func newRound(conn *net.UDPConn) (roundMoves MovesMessage){
 
 /*
 * INIT FUNCTIONS
-*/
+ */
 
 func CreateInitPlayerPosition() Move {
 	var direction string
@@ -341,11 +341,15 @@ func CreateInitPlayerPosition() Move {
 	} else {
 		direction = "RIGHT"
 	}
+	// Give a small buffer so they don't crash into a wall immediately!
+	if (gameState.GridWidth < 30) || (gameState.GridHeight < 30) {
+		panic("game grid dimensions are too small!")
+	}
 	return Move{
-		X: randomInt(1, gameState.GridWidth-2),
-		Y: randomInt(1, gameState.GridHeight-2),
+		X:         randomInt(15, gameState.GridWidth-15),
+		Y:         randomInt(15, gameState.GridHeight-15),
 		Direction: direction,
-		}
+	}
 }
 
 func registerNewPlayer(raddr *net.UDPAddr, buf []byte) {
@@ -369,7 +373,7 @@ func initLobby(conn *net.UDPConn) {
 		buf, raddr := readFromUDP(conn)
 		if isJoinMessage(buf) {
 			address := raddr.String()
-			if _, knownPlayer := gameState.AddrToPid[address]; !knownPlayer {				
+			if _, knownPlayer := gameState.AddrToPid[address]; !knownPlayer {
 				registerNewPlayer(raddr, buf)
 			}
 		} else if isStartMessage(buf) {
@@ -413,7 +417,7 @@ func contactLeader(){
 		addressState.leaderUDPAddr)
 	checkError(err)
 	if addressState.isLeader {
-		message := <- addressState.sendChan
+		message := <-addressState.sendChan
 		logClient("Go client got START message. Sending to leader")
 		_, err = addresssState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
 		checkError(err)
@@ -446,7 +450,7 @@ func initializeJavaConnection() {
 		addressState.sendChan <- []byte(str)
 	}
 	logJava("Waiting for the go message to send to java")
-	reply := <- addressState.recvChan
+	reply := <-addressState.recvChan
 	logJava("reply " + string(reply))
 	conn.Write(append(reply, '\n'))
 	logJava("Wrote game start message to java. Lobby phase over, entering main loop")
@@ -466,6 +470,10 @@ func initializeGameState() {
 	for i := 0; i < len(gameState.Positions); i++ {
 		gameState.Positions[i] = make(map[string]Move)
 	}
+	gameState.Grid = make([][]int, gameState.GridWidth)
+	for i := 0; i < gameState.GridWidth; i++ {
+		gameState.Grid[i] = make([]int, gameState.GridHeight)
+	}
 	gameState.Alive = make(map[string]bool)
 	gameState.Grace = make(map[string]int)
 	gameState.AddrToPid = make(map[string]string)
@@ -476,7 +484,7 @@ func initializeGameState() {
 	isLeader, err := strconv.ParseBool(os.Args[3])
 	checkError(err)
 
-	addressState.javaAddr =  "localhost:"+ os.Args[1]
+	addressState.javaAddr = "localhost:" + os.Args[1]
 	addressState.leaderAddr = os.Args[2]
 	addressState.isLeader = isLeader
 	addressState.sendChan = make(chan []byte, 1)
@@ -485,7 +493,7 @@ func initializeGameState() {
 
 /*
 * CHECK FUNCTIONS
-*/
+ */
 
 func gameOver() bool {
 	if DISABLE_GAME_OVER {
@@ -508,7 +516,7 @@ func countGracePeriod(pid string) {
 		logLeader("Player " + pid + " grace period = " + strconv.Itoa(gameState.Grace[pid]))
 		if gameState.Grace[pid] >= MAX_ALLOWABLE_MISSED_MESSAGES {
 			logLeader("Grace period for player " + pid + " exceeded. Force dropping them")
-			killPlayer(pid)
+			dropPlayer(pid)
 		}
 	}
 }
@@ -531,7 +539,7 @@ func isGameOverMessage(buf []byte) bool {
 
 /*
 * UTILITY FUNCTIONS
-*/
+ */
 
 func checkError(err error) {
 	if err != nil {
@@ -540,11 +548,18 @@ func checkError(err error) {
 	}
 }
 
+// Slight difference from killing player; we owe no obligation to respond to dropped players,
+// but we should respond to killed players that are still connected.
+func dropPlayer(pid string) {
+	logLeader("dropping player " + pid)
+	gameState.DroppedForever[pid] = true
+	killPlayer(pid)
+}
+
 func killPlayer(pid string) {
 	if gameState.Alive[pid] {
 		logLeader("killing player " + pid)
 		gameState.Alive[pid] = false
-		gameState.DroppedForever[pid] = true
 		gameState.Finish = append(gameState.Finish, pid)
 	}
 	if gameOver() {
@@ -576,27 +591,42 @@ func addContinuedMove(pid string) {
 	makeMove(prevMove.Direction, pid)
 }
 
+// Attempt to move the player pid one space in given direction. If movement
+// results in collision, the player dies.
 func makeMove(direction string, pid string) Move {
 	//TODO what about a linked list?
 	prevMove := gameState.Positions[len(gameState.Positions)-2][pid]
-	nextMove := Move{
-		Direction: direction,
-		X: prevMove.X,
-		Y: prevMove.Y,
-	}
-	switch nextMove.Direction {
-	case "DOWN":
-		nextMove.Y = max(1, nextMove.Y-1)
-	case "UP":
-		nextMove.Y = min(gameState.GridHeight-2, nextMove.Y+1)
-	case "LEFT":
-		nextMove.X = max(1, nextMove.X-1)
-	case "RIGHT":
-		nextMove.X = min(gameState.GridWidth-2, nextMove.X+1)
-	default:
-		panic("Next move direction unknown")
+	var nextMove Move
+	if gameState.Alive[pid] {
+		nextMove = Move{
+			Direction: direction,
+			X:         prevMove.X,
+			Y:         prevMove.Y,
+		}
+		switch nextMove.Direction {
+		case "DOWN":
+			nextMove.Y = max(1, nextMove.Y-1)
+		case "UP":
+			nextMove.Y = min(gameState.GridHeight-2, nextMove.Y+1)
+		case "LEFT":
+			nextMove.X = max(1, nextMove.X-1)
+		case "RIGHT":
+			nextMove.X = min(gameState.GridWidth-2, nextMove.X+1)
+		default:
+			panic("Next move direction unknown")
+		}
+
+		if isCollision(nextMove.X, nextMove.Y) {
+			killPlayer(pid)
+			nextMove = prevMove
+		} else {
+			gameState.Grid[nextMove.X][nextMove.Y], _ = strconv.Atoi(pid)
+		}
+	} else { // Player is dead, keep old move.
+		nextMove = prevMove
 	}
 	getCurrentMoveMap()[pid] = nextMove
+
 	return nextMove
 }
 
@@ -631,18 +661,20 @@ func timeToRespond() bool {
 	return false
 }
 
-
 //TODO No comment.
 func isCollision(x, y int) bool {
-	if COLLISION_IS_DEATH {
+	if !COLLISION_IS_DEATH {
 		return false
+	} else if (0 <= x && x < gameState.GridWidth) && (0 <= y && y < gameState.GridHeight) {
+		return gameState.Grid[x][y] != 0
+	} else {
+		return true
 	}
-	return false
 }
 
 /*
 * MAIN FUNCTIONS
-*/
+ */
 func main() {
 	fmt.Println("Go process started")
 	if FOLLOWER_RESPONSE_TIME < MIN_GAME_SPEED {
@@ -691,9 +723,6 @@ func leaderListener(conn *net.UDPConn) {
 			if round == gameState.Round && !gameState.DroppedForever[pid] {
 				if surviveFollowerResponseInjectedFailure(pid) {
 					move := makeMove(direction, pid)
-					if isCollision(move.X, move.Y) {
-						killPlayer(pid)
-					}
 					getCurrentMoveMap()[pid] = move
 					logLeader("Received move message " + string(encodeMessage(move)) +
 						" from player " + pid)
@@ -746,7 +775,7 @@ func goClient(wg sync.WaitGroup) {
 			dat := decodeMessage(buf)
 			roundString, _ := dat["round"].(float64)
 			gameState.Round = int(roundString)
-			message := <- addressState.sendChan
+			message := <-addressState.sendChan
 			_, err := addressState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
 			checkError(err)
 			break
@@ -755,7 +784,7 @@ func goClient(wg sync.WaitGroup) {
 			break
 		case "gameover":
 			//TODO test if its working
-			gameOver := true
+			gameOver = true
 			logClient("Cloosing Client")
 			break
 		case "newleader":
@@ -771,7 +800,7 @@ func goClient(wg sync.WaitGroup) {
 		}
 	}
 	logClient("Cloosng Client")
-	
+
 }
 
 func javaGoConnection(wg sync.WaitGroup) {
@@ -794,7 +823,7 @@ func javaGoConnection(wg sync.WaitGroup) {
 		checkError(err)
 		// send buf to leader channel
 		addressState.sendChan <- []byte(status)
-		reply := <- addressState.recvChan
+		reply := <-addressState.recvChan
 		addressState.javaConnection.Write(append(reply, '\n'))
 		checkError(err)
 	}
@@ -847,3 +876,4 @@ func electNewLeader() {
 	addressState.leaderAddr = newLeaderConn.LocalAddr()
 	initializeLeaderConenction()
 }
+
