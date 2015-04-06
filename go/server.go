@@ -413,13 +413,13 @@ func initializeLeaderConnection() {
 func contactLeader(){
 	initializeLeaderConnection()
 	logClient("Sending a hello message to the leader")
-	_, err = addressState.goConnection.WriteToUDP([]byte("JOIN:"+ gameState.Nickname),
+	_, err := addressState.goConnection.WriteToUDP([]byte("JOIN:"+ gameState.Nickname),
 		addressState.leaderUDPAddr)
 	checkError(err)
 	if addressState.isLeader {
 		message := <-addressState.sendChan
 		logClient("Go client got START message. Sending to leader")
-		_, err = addresssState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
+		_, err = addressState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
 		checkError(err)
 	}
 
@@ -760,8 +760,8 @@ func goClient(wg sync.WaitGroup) {
 				bufChan = make(chan []byte, 1)
 				go func() {
 					time.Sleep(FOLLOWER_RESPONSE_TIME)
-					bufChan.Close()
-				}
+					close(bufChan)
+				}()
 				go startElection(bufChan)
 			}
 			continue
@@ -840,22 +840,20 @@ func startElection(bufChan chan []byte) {
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(addressState.goConnection, byt)
-	tiomeoutTimeForElection := time.Now().Add(FOLLOWER_RESPONSE_TIME)
 	received := 0
 	positive := 0
 	for {
 		buf, timedout := <- bufChan
-		if timedout || received == len(gameState.AddrToPid-2) {
+		if timedout || received == len(gameState.AddrToPid) - 2 {
 			break
 		}
 		messageType := getMessageType(buf)
 		received++
-		if messageType("leaderdead") {
+		if messageType == "leaderdead" {
 			positive++
 		}
 	}
-	
-	if positive > received/2 {
+	if positive > received / 2 {
 		electNewLeader()
 	}
 }
@@ -863,17 +861,17 @@ func startElection(bufChan chan []byte) {
 
 func electNewLeader() {
 	newLeaderConn := initializeLeader(":0")
-	message = LeaderElectionMessage{
+	message := LeaderElectionMessage{
 		MessageType: "newleader",
 		Round: gameState.Round,
 	}
-	byt = encodeMessage(message)
+	byt := encodeMessage(message)
 	broadcastMessage(newLeaderConn, byt)
 	time.Sleep(100*time.Millisecond)
 	go leaderListener(newLeaderConn)
 	//TODO sleep might be needed
 	//TODO not sure if working
-	addressState.leaderAddr = newLeaderConn.LocalAddr()
-	initializeLeaderConenction()
+	addressState.leaderAddr = newLeaderConn.LocalAddr().String()
+	initializeLeaderConnection()
 }
 
