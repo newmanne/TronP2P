@@ -714,11 +714,12 @@ func leaderListener(conn *net.UDPConn) {
 }
 
 func goClient(wg sync.WaitGroup) {
+	gameOver := false
 	defer wg.Done()
 	initializeConnection()
 	defer addressState.goConnection.Close()
 	logClient("Waiting for leader to respond with game start details")
-	for {
+	for !gameOver {
 		timeoutTimeForRound := time.Now().Add(FOLLOWER_RESPONSE_TIME)
 		buf, raddr, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
 		fmt.Println(timedout, raddr) //remove
@@ -737,9 +738,9 @@ func goClient(wg sync.WaitGroup) {
 			addressState.recvChan <- buf
 			break
 		case "gameover":
-			//BUG currently not functioning, need to break out of the loop in someway.
-			//a bool tag should work, but its ugly
-			logClient("Cloosng Client")
+			//TODO test if its working
+			gameOver := true
+			logClient("Cloosing Client")
 			break
 		case "newleader":
 			break
