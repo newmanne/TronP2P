@@ -395,24 +395,31 @@ func initializeLeader(leaderAddrString string) (conn *net.UDPConn) {
 	return
 }
 
-func initializeConnection(){
+func initializeLeaderConnection() {
 	addr, err := net.ResolveUDPAddr("udp", "localhost:0")
 	checkError(err)
 	conn, err := net.ListenUDP("udp", addr)
 	checkError(err)
 	leaderUDPAddr, err := net.ResolveUDPAddr("udp", addressState.leaderAddr)
 	checkError(err)
+	addressState.goConnection = conn
+	addressState.leaderUDPAddr = leaderUDPAddr
+}
+
+func contactLeader(){
+	initializeLeaderConnection()
 	logClient("Sending a hello message to the leader")
-	_, err = conn.WriteToUDP([]byte("JOIN:"+ gameState.Nickname), leaderUDPAddr)
+	_, err = addressState.goConnection.WriteToUDP([]byte("JOIN:"+ gameState.Nickname),
+		addressState.leaderUDPAddr)
 	checkError(err)
 	if addressState.isLeader {
 		message := <- addressState.sendChan
 		logClient("Go client got START message. Sending to leader")
-		_, err = conn.WriteToUDP([]byte(message), leaderUDPAddr)
+		_, err = addresssState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
 		checkError(err)
 	}
 
-	buf, _ := readFromUDP(conn)
+	buf, _ := readFromUDP(addressState.goConnection)
 	logClient("Received a game start response from the leader:" + string(buf))
 	dat := decodeMessage(buf)["gameStart"].(map[string]interface{})
 	pid, _ := strconv.Atoi(dat["pid"].(string))
@@ -425,8 +432,6 @@ func initializeConnection(){
 		gameState.AddrToAddr[addr] = raddr
 	}
 	addressState.recvChan <- buf
-	addressState.goConnection = conn
-	addressState.leaderUDPAddr = leaderUDPAddr
 }
 
 func initializeJavaConnection() {
@@ -666,9 +671,7 @@ func main() {
 }
 
 /*
-*######################################
-*##### Functions to be redesigned #####
-*######################################
+* Routines
 */
 
 func leaderListener(conn *net.UDPConn) {
@@ -700,7 +703,7 @@ func leaderListener(conn *net.UDPConn) {
 				}
 			} else {
 				logLeader("Recieved a move message from " + pid + " from an old round " +
-					strconv.Itoa(round) +	" but current round is " +
+					strconv.Itoa(round) + " but current round is " +
 					strconv.Itoa(gameState.Round) + ". Ignoring message")
 			}
 		}
@@ -714,15 +717,28 @@ func leaderListener(conn *net.UDPConn) {
 }
 
 func goClient(wg sync.WaitGroup) {
+	var bufChan chan []byte
 	gameOver := false
 	defer wg.Done()
-	initializeConnection()
+	contactLeader()
 	defer addressState.goConnection.Close()
 	logClient("Waiting for leader to respond with game start details")
 	for !gameOver {
 		timeoutTimeForRound := time.Now().Add(FOLLOWER_RESPONSE_TIME)
-		buf, raddr, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
-		fmt.Println(timedout, raddr) //remove
+		buf, _, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
+		if timedout {
+			if electionState == NORMAL {
+				bufChan = make(chan []byte, 1)
+				go func() {
+					time.Sleep(FOLLOWER_RESPONSE_TIME)
+					bufChan.Close()
+				}
+				go startElection(bufChan)
+			}
+			continue
+		}
+
+		//might be usefull to move it to a separate routine? if it gets slow, that is
 		messageType := getMessageType(buf)
 		switch messageType {
 		case "roundstart":
@@ -745,10 +761,10 @@ func goClient(wg sync.WaitGroup) {
 		case "newleader":
 			break
 		case "checkleader":
+ 
 			break
-		case "leaderdead":
-			break
-		case "leaderalive":
+		case "leaderalive", "leaderdead":
+			bufChan <- buf
 			break
 		default:
 			panic("Cannot understand message type: " + messageType)
@@ -784,3 +800,50 @@ func javaGoConnection(wg sync.WaitGroup) {
 	}
 }
 
+/*
+* Leader election
+*/
+
+func startElection(bufChan chan []byte) {
+	message := LeaderElectionMessage{
+		MessageType: "checkleader",
+		Round: gameState.Round,
+	}
+	byt := encodeMessage(message)
+	broadcastMessage(addressState.goConnection, byt)
+	tiomeoutTimeForElection := time.Now().Add(FOLLOWER_RESPONSE_TIME)
+	received := 0
+	positive := 0
+	for {
+		buf, timedout := <- bufChan
+		if timedout || received == len(gameState.AddrToPid-2) {
+			break
+		}
+		messageType := getMessageType(buf)
+		received++
+		if messageType("leaderdead") {
+			positive++
+		}
+	}
+	
+	if positive > received/2 {
+		electNewLeader()
+	}
+}
+
+
+func electNewLeader() {
+	newLeaderConn := initializeLeader(":0")
+	message = LeaderElectionMessage{
+		MessageType: "newleader",
+		Round: gameState.Round,
+	}
+	byt = encodeMessage(message)
+	broadcastMessage(newLeaderConn, byt)
+	time.Sleep(100*time.Millisecond)
+	go leaderListener(newLeaderConn)
+	//TODO sleep might be needed
+	//TODO not sure if working
+	addressState.leaderAddr = newLeaderConn.LocalAddr()
+	initializeLeaderConenction()
+}
