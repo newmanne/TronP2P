@@ -15,6 +15,7 @@ import (
 )
 
 var gameState GameState
+var addressState AddressState
 var electionState = NORMAL
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
@@ -41,6 +42,7 @@ type GameState struct {
 	MyPriority     int
 	GridWidth      int
 	GridHeight     int
+	Nickname       string
 	Positions      []map[string]Move
 	Alive          map[string]bool
 	Grace          map[string]int
@@ -49,6 +51,18 @@ type GameState struct {
 	AddrToAddr     map[string]*net.UDPAddr
 	PidToNickname  map[string]string
 	DroppedForever map[string]bool
+}
+
+type AddressState struct {
+	javaAddr string
+	leaderAddr string
+	leaderUDPAddr *net.UDPAddr
+	isLeader bool
+	goConnection *net.UDPConn
+	javaConnection net.Conn
+	connBuf *bufio.Reader
+	sendChan chan []byte
+	recvChan chan []byte
 }
 
 type RoundStart struct {
@@ -381,30 +395,57 @@ func initializeLeader(leaderAddrString string) (conn *net.UDPConn) {
 	return
 }
 
-func initializeConnection(sendChan chan string, leaderAddrString, nickname string, isLeader bool) (conn *net.UDPConn, leaderAddr *net.UDPAddr) {
+func initializeConnection(){
 	addr, err := net.ResolveUDPAddr("udp", "localhost:0")
 	checkError(err)
-	conn, err = net.ListenUDP("udp", addr)
+	conn, err := net.ListenUDP("udp", addr)
 	checkError(err)
-	leaderAddr, err = net.ResolveUDPAddr("udp", leaderAddrString)
+	leaderUDPAddr, err := net.ResolveUDPAddr("udp", addressState.leaderAddr)
 	checkError(err)
 	logClient("Sending a hello message to the leader")
-	_, err = conn.WriteToUDP([]byte("JOIN:"+nickname), leaderAddr)
+	_, err = conn.WriteToUDP([]byte("JOIN:"+ gameState.Nickname), leaderUDPAddr)
 	checkError(err)
-	if isLeader {
-		message := <-sendChan
+	if addressState.isLeader {
+		message := <- addressState.sendChan
 		logClient("Go client got START message. Sending to leader")
-		_, err = conn.WriteToUDP([]byte(message), leaderAddr)
+		_, err = conn.WriteToUDP([]byte(message), leaderUDPAddr)
 		checkError(err)
 	}
-	return
+
+	buf, _ := readFromUDP(conn)
+	logClient("Received a game start response from the leader:" + string(buf))
+	dat := decodeMessage(buf)["gameStart"].(map[string]interface{})
+	pid, _ := strconv.Atoi(dat["pid"].(string))
+	gameState.MyPid = pid
+	addresses := dat["addresses"].(map[string]interface{})
+	for addr, pid := range addresses {
+		raddr, err := net.ResolveUDPAddr("udp", addr)
+		checkError(err)
+		gameState.AddrToPid[addr] = pid.(string)
+		gameState.AddrToAddr[addr] = raddr
+	}
+	addressState.recvChan <- buf
+	addressState.goConnection = conn
+	addressState.leaderUDPAddr = leaderUDPAddr
 }
 
-func initializeJavaConnection(sendChan chan string, javaAddrString string) (conn net.Conn) {
-	logJava("Trying to connect to java on " + javaAddrString)
-	conn, err := net.Dial("tcp", javaAddrString)
+func initializeJavaConnection() {
+	logJava("Trying to connect to java on " + addressState.javaAddr)
+	conn, err := net.Dial("tcp", addressState.javaAddr)
+	addressState.connBuf = bufio.NewReader(conn)
 	checkError(err)
-	return
+	if addressState.isLeader {
+		str, err := addressState.connBuf.ReadString('\n')
+		checkError(err)
+		logJava("Received a start game message from java: " + str)
+		addressState.sendChan <- []byte(str)
+	}
+	logJava("Waiting for the go message to send to java")
+	reply := <- addressState.recvChan
+	logJava("reply " + string(reply))
+	conn.Write(append(reply, '\n'))
+	logJava("Wrote game start message to java. Lobby phase over, entering main loop")
+	addressState.javaConnection = conn
 }
 
 func initializeGameState() {
@@ -415,6 +456,7 @@ func initializeGameState() {
 	checkError(err)
 	gameState.GridHeight, err = strconv.Atoi(os.Args[5])
 	checkError(err)
+	gameState.Nickname = os.Args[6]
 	gameState.Positions = make([]map[string]Move, MAX_ALLOWABLE_MISSED_MESSAGES)
 	for i := 0; i < len(gameState.Positions); i++ {
 		gameState.Positions[i] = make(map[string]Move)
@@ -425,6 +467,15 @@ func initializeGameState() {
 	gameState.AddrToAddr = make(map[string]*net.UDPAddr)
 	gameState.PidToNickname = make(map[string]string)
 	gameState.DroppedForever = make(map[string]bool)
+
+	isLeader, err := strconv.ParseBool(os.Args[3])
+	checkError(err)
+
+	addressState.javaAddr =  "localhost:"+ os.Args[1]
+	addressState.leaderAddr = os.Args[2]
+	addressState.isLeader = isLeader
+	addressState.sendChan = make(chan []byte, 1)
+	addressState.recvChan = make(chan []byte, 1)
 }
 
 /*
@@ -459,15 +510,18 @@ func countGracePeriod(pid string) {
 
 //TODO Those functions are pointless and completely stupid. We have a function to get the message type
 func isJoinMessage(buf []byte) bool {
+	//return getMessageType(message) == "join"
 	return strings.Contains(strings.TrimSpace(string(buf)), "JOIN")
 }
 
 func isStartMessage(buf []byte) bool {
+	//return getMessageType(message) == "start"
 	return strings.TrimSpace(string(buf)) == "START"
 }
 
-func isGameOverMessage(message string) bool {
-	return strings.Contains(message, "GameOver")
+func isGameOverMessage(buf []byte) bool {
+	return getMessageType(buf) == "gameover"
+	return strings.Contains(string(buf), "GameOver")
 }
 
 /*
@@ -593,13 +647,9 @@ func main() {
 		panic("RTFM")
 	}
 	initializeGameState()
-	javaPort, leaderAddr, nickname := os.Args[1], os.Args[2], os.Args[6]
-	isLeader, err := strconv.ParseBool(os.Args[3])
-	checkError(err)
-	sendChan, recvChan := make(chan string, 1), make(chan string, 1)
-	if isLeader {
+	if addressState.isLeader {
 		go func() {
-			conn := initializeLeader(leaderAddr)
+			conn := initializeLeader(addressState.leaderAddr)
 			logLeader("Leader has started")
 			initLobby(conn)
 			go leaderListener(conn)
@@ -609,8 +659,8 @@ func main() {
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go goClient(sendChan, recvChan, leaderAddr, wg, isLeader, nickname)
-	go javaGoConnection(sendChan, recvChan, "localhost:"+javaPort, wg, isLeader)
+	go goClient(wg)
+	go javaGoConnection(wg)
 	wg.Wait()
 	fmt.Println("GOODBYE")
 }
@@ -653,7 +703,6 @@ func leaderListener(conn *net.UDPConn) {
 					strconv.Itoa(round) +	" but current round is " +
 					strconv.Itoa(gameState.Round) + ". Ignoring message")
 			}
-			
 		}
 		if gameOver() {
 			break
@@ -664,307 +713,73 @@ func leaderListener(conn *net.UDPConn) {
 	}
 }
 
-
-
-//NOTE maybe we don't need to define timeout outside. message needs to be defined outside to receive it though
-//NOTE argh, so many parameters. solvable someway? maybe a struct since we're always passing the same parameters to everything?
-func dealWithGameMessages(killChan chan bool, sendChan, recvChan chan string, messageChan, messageChan2 chan []byte, leaderAddr *net.UDPAddr, conn *net.UDPConn ) {	
-	//NOTE need to interrupt it at some point	
-//	var buf []byte
-//	var timedout bool
-	var buf []byte
-	var ok bool
+func goClient(wg sync.WaitGroup) {
+	defer wg.Done()
+	initializeConnection()
+	defer addressState.goConnection.Close()
+	logClient("Waiting for leader to respond with game start details")
 	for {
-		timedout := false
-//		timeout := make(chan bool, 1)
-		trollChan := make(chan []byte, 1)
-		go func() {
-			defer func() {
-				if recover() == nil {
-					fmt.Println("PANIC")
-					return
-				}
-			}()
-			temp := <- messageChan
-			trollChan <-temp
-		}()
-
-		//NOTE current timeout keeps running. im afraid that if a new leader is not elected in time it will trigger another election. mayne is solvable with an ID? not sure though
-		//timeout := make(chan bool, 1)
-		go func () {
-			time.Sleep(FOLLOWER_RESPONSE_TIME)
-			fmt.Println("TIMEOUT");
-			close(trollChan)
-			timedout = true;
-			//timeout <- true
-		}()
-
-		//select {
-			//case
-
-			//timedout = false;
-			//break
-		//case <-timeout:
-			//timedout = true;
-			//break
-		//}
-		buf, ok = <- trollChan
-		fmt.Println(ok)
-//		timeout <- false
-//		timedout := <- timeout
-		if !ok {
-			fmt.Println(electionState)
-			if electionState == NORMAL {
-				fmt.Println("STARTING ELECTION")
-				electionState = QUORUM
-				go initElection(conn, killChan, messageChan2)
-			}
-			timedout = false
-			continue
-		} else if electionState == QUORUM {
-			electionState = NORMAL
-			//BUG this is currently ineffective since killchan is not used inside
-			killChan <- true
-		}
-		
-		logClient("Got message " + string(buf) + " from leader, passing it to java")
-		recvChan <- string(buf)
-
-		if getMessageType(buf) == "roundstart" {
+		timeoutTimeForRound := time.Now().Add(FOLLOWER_RESPONSE_TIME)
+		buf, raddr, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
+		fmt.Println(timedout, raddr) //remove
+		messageType := getMessageType(buf)
+		switch messageType {
+		case "roundstart":
+			addressState.recvChan <- buf
 			dat := decodeMessage(buf)
 			roundString, _ := dat["round"].(float64)
 			gameState.Round = int(roundString)
-			// wait for message from java
-			message := <-sendChan
-			// write message to leader address
-			_, err := conn.WriteToUDP([]byte(message), leaderAddr)
-			fmt.Println("$$$$$$$$$$$$$$$$$$$$$")
-			fmt.Println("$$$$$$$$$$$$$$$$$$$$$")
-			fmt.Println(message)
-			fmt.Println("$$$$$$$$$$$$$$$$$$$$$")
-			fmt.Println("$$$$$$$$$$$$$$$$$$$$$")
+			message := <- addressState.sendChan
+			_, err := addressState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
 			checkError(err)
-		}
-	}
-}
-
-func goClient(sendChan chan string, recvChan chan string, leaderAddrString string, wg sync.WaitGroup, isLeader bool, nickname string) {
-	defer wg.Done()
-	conn, leaderAddr := initializeConnection(sendChan, leaderAddrString, nickname, isLeader)
-	defer conn.Close()
-	// Read response from leader
-	logClient("Waiting for leader to respond with game start details")
-
-	buf, _ := readFromUDP(conn)
-	logClient("Received a game start response from the leader:" + string(buf))
-	dat := decodeMessage(buf)
-	fmt.Println(dat)
-	dat2 := dat["gameStart"].(map[string]interface{})
-	fmt.Println(dat2)
-	pid, _ := strconv.Atoi(dat2["pid"].(string))
-	gameState.MyPid = pid
-	addresses := dat2["addresses"].(map[string]interface{})
-	for addr, pid := range addresses {
-		raddr, err := net.ResolveUDPAddr("udp", addr)
-		gameState.AddrToPid[addr] = pid.(string)
-		gameState.AddrToAddr[addr] = raddr
-		checkError(err)
-	}
-	fmt.Println(gameState.AddrToAddr)
-	fmt.Println(gameState.MyPid)
-	// write back to channel with byte response (let java know to start)
-	recvChan <- string(buf)
-
-	logClient("LOBBY PHASE IS OVER. ENTERING MAIN LOOP")
-	// MAIN GAME LOOP
-	messageChan := make(chan []byte, 1)
-	//TODO find a better name
-	messageChan2 := make(chan []byte, 1)
-	killChan := make(chan bool, 1)
-	go dealWithGameMessages(killChan, sendChan, recvChan, messageChan, messageChan2, leaderAddr, conn)
-	for {
-		// read round start from leader
-		buf, raddr := readFromUDP(conn)
-		fmt.Println("____________________________________________________________")
-		fmt.Println(raddr)
-		fmt.Println(decodeMessage(buf))
-		fmt.Println("____________________________________________________________")
-		
-		//NOTE might be worth to decode the message it and pass it decoded? not sure with java after though
-		//NOTE might be worth to check the roundmessage here, we have a bunch of code duplication
-		//NOTE I'm considering extracting checkleader code to another method
-		switch getMessageType(buf) {
-		case "roundstart":
-			messageChan <- buf
-			break;
+			break
 		case "moves":
-			messageChan <- buf
-			break;
+			addressState.recvChan <- buf
+			break
 		case "gameover":
-			logClient("Delivered a game over message. My work here is done. Goodbye")
 			//BUG currently not functioning, need to break out of the loop in someway.
 			//a bool tag should work, but its ugly
-			break;
+			logClient("Cloosng Client")
+			break
 		case "newleader":
-			dat := decodeMessage(buf)
-			roundString, _ := dat["round"].(float64)
-			round := int(roundString)
-			if gameState.Round  > round {
-				break;
-			} else {
-				fmt.Println("new leader set")
-				leaderAddr = raddr
-			}
+			break
 		case "checkleader":
-			fmt.Println("___________            _________         ________")
-			dat := decodeMessage(buf)
-			roundString, _ := dat["round"].(float64)
-			round := int(roundString)
-
-			if gameState.Round > round {
-				_, err := conn.WriteToUDP(encodeMessage(LeaderElectionMessage{MessageType: "leaderalive", Round: gameState.Round}), raddr)
-				checkError(err)
-				break
-			}
-			pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()])
-			fmt.Println("Checking")
-			fmt.Println(pid)
-			fmt.Println(gameState.MyPid)
-			if electionState == QUORUM && pid > gameState.MyPid {
-				fmt.Println("WAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-				electionState = NORMAL
-				//BUG this is currently ineffective since killchan is not used inside
-				killChan <- true
-			} else {
-				_, err := conn.WriteToUDP(encodeMessage(LeaderElectionMessage{MessageType: "leaderdead", Round: gameState.Round}), raddr)
-				checkError(err)
-			}
-			break;
+			break
 		case "leaderdead":
-			messageChan2 <- buf
+			break
 		case "leaderalive":
-			messageChan2 <- buf
+			break
 		default:
-			panic("Cannot understdand message type: " + getMessageType(buf))
+			panic("Cannot understand message type: " + messageType)
 		}
 	}
-	logClient("My work here as a client is done. Goodbye")
+	logClient("Cloosng Client")
+	
 }
 
-func javaGoConnection(sendChan chan string, recvChan chan string, javaAddrString string, wg sync.WaitGroup, isLeader bool) {
+func javaGoConnection(wg sync.WaitGroup) {
 	defer wg.Done()
-	conn := initializeJavaConnection(sendChan, javaAddrString)
-	defer conn.Close()
-	connBuf := bufio.NewReader(conn)
-	if isLeader {
-		str, err := connBuf.ReadString('\n')
-		checkError(err)
-		logJava("Received a start game message from java: " + str)
-		sendChan <- str
-	}
-	// LOBBY PHASE; need to recv response from leader,
-	// pass message onto java side (first round start)
-	logJava("Waiting for the go message to send to java")
-	reply := <-recvChan
-	logJava("reply " + reply)
-	conn.Write([]byte(reply + "\n"))
-	//checkError(err)	
-	logJava("Wrote game start message to java. Lobby phase over, entering main loop")
-	// MAIN LOOP
+	initializeJavaConnection()
+	defer addressState.javaConnection.Close()
 	for {
-		// read round start message from channel and send it to java
 		logJava("Waiting for message from go client")
-		message := <-recvChan
-		logJava("Sending the following message to java:" + message)
-		conn.Write([]byte(message + "\n"))
-		logJava("Message has been sent to java")
+		message := <-addressState.recvChan
+		logJava("Sending the following message to java:" + string(message))
+		addressState.javaConnection.Write(append(message, '\n'))
 		if isGameOverMessage(message) {
 			logJava("A Game Over was sent to java. My work here is done. Goodbye")
 			break
 		}
 		// read some reply from the java game (update of move, or death)
 		time.Sleep(MIN_GAME_SPEED)
-		status, err := connBuf.ReadString('\n')
+		status, err := addressState.connBuf.ReadString('\n')
 		logJava("Received: " + status)
 		checkError(err)
 		// send buf to leader channel
-		sendChan <- status
-		reply := <-recvChan
-		conn.Write([]byte(reply + "\n"))
+		addressState.sendChan <- []byte(status)
+		reply := <- addressState.recvChan
+		addressState.javaConnection.Write(append(reply, '\n'))
 		checkError(err)
 	}
 }
 
-func initElection(conn *net.UDPConn, killChan chan bool, messageChan chan []byte) {
-	var buf []byte
-	var ok = true
-	var count = 1
-	var positive = 1
-
-	message := LeaderElectionMessage{MessageType: "checkleader", Round: gameState.Round}
-	byt := encodeMessage(message)
-	broadcastMessage(conn, byt)
-
-	//timeout := make(chan bool, 1)
-	timedout := false
-	fmt.Println("STARTED ELECTION")
-	for !timedout && ok {
-		trollChan := make(chan []byte, 1)
-		go func() {
-			defer func() {
-				if recover() == nil {
-					fmt.Println("PANIC")
-					return
-				}
-			}()
-			temp := <- messageChan
-			trollChan <-temp
-		}()
-		go func () {
-			time.Sleep(time.Second *2)
-			fmt.Println("TIMEOUT*2");
-			close(trollChan)
-			timedout = true;
-			//timeout <- true
-		}()
-		//select {
-		//case
-		buf, ok = <- trollChan
-		//break
-		//case timedout = <- timeout:
-		//break
-		//}
-		if !ok {
-			break
-		}
-		fmt.Println("RECEIVED BUDDY")
-		dat := decodeMessage(buf)
-		fmt.Println(dat)
-		messageType, _ := dat["messagetype"].(string)
-		count ++;
-		if messageType == "leaderdead" {
-			roundString, _ := dat["round"].(float64)
-			round := int(roundString)
-			if round >= gameState.Round {
-				positive++
-			}
-		}		
-	}
-	fmt.Println("ELECTING?")
-	if positive <=  count/2  || electionState != QUORUM {
-		electionState = NORMAL
-		return
-	}
-	fmt.Println("ELECTED")
-	electionState = NEWLEADER
-
-	/*elect leader */
-	fmt.Println("I'm the leader")
-	newLeaderConn := initializeLeader(":0")
-	message = LeaderElectionMessage{MessageType: "newleader", Round: gameState.Round}
-	byt = encodeMessage(message)
-	broadcastMessage(newLeaderConn, byt)
-	time.Sleep(100*time.Millisecond)
-	go leaderListener(newLeaderConn)
-	electionState = NORMAL
-}
