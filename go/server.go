@@ -251,11 +251,15 @@ func parseMessage(buf []byte) (string, string, int) {
 }
 
 func getMessageType(buf []byte) (messageType string) {
-	fmt.Println(buf)
 	dat := decodeMessage(buf)
-	fmt.Println(dat)
 	messageType = dat["messageType"].(string)
-	fmt.Println(messageType)
+	return
+}
+
+func getRoundNumber(buf []byte) (round int) {
+	dat := decodeMessage(buf)
+	roundString, _ := dat["round"].(float64)
+	round = int(roundString)
 	return
 }
 
@@ -754,9 +758,10 @@ func goClient(wg sync.WaitGroup) {
 	logClient("Waiting for leader to respond with game start details")
 	for !gameOver {
 		timeoutTimeForRound := time.Now().Add(FOLLOWER_RESPONSE_TIME)
-		buf, _, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
+		buf, raddr, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
 		if timedout {
 			if electionState == NORMAL {
+				electionState = QUORUM
 				bufChan = make(chan []byte, 1)
 				go func() {
 					time.Sleep(FOLLOWER_RESPONSE_TIME)
@@ -772,9 +777,7 @@ func goClient(wg sync.WaitGroup) {
 		switch messageType {
 		case "roundstart":
 			addressState.recvChan <- buf
-			dat := decodeMessage(buf)
-			roundString, _ := dat["round"].(float64)
-			gameState.Round = int(roundString)
+			gameState.Round = getRoundNumber(buf)
 			message := <-addressState.sendChan
 			_, err := addressState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
 			checkError(err)
@@ -790,7 +793,26 @@ func goClient(wg sync.WaitGroup) {
 		case "newleader":
 			break
 		case "checkleader":
- 
+			var message LeaderElectionMessage
+			if gameState.Round > getRoundNumber(buf) {
+				message = LeaderElectionMessage{
+					MessageType: "leaderalive",
+					Round: gameState.Round,
+				}
+			} else {
+				pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()])
+				if electionState == QUORUM && pid < gameState.MyPid {
+					//stop my election
+				}
+				message = LeaderElectionMessage{
+					MessageType: "leaderdead",
+					Round: gameState.Round,
+					
+				}
+			}
+			byt := encodeMessage(message)
+			_, err := addressState.goConnection.WriteToUDP(byt, raddr)
+			checkError(err)
 			break
 		case "leaderalive", "leaderdead":
 			bufChan <- buf
@@ -873,5 +895,7 @@ func electNewLeader() {
 	//TODO not sure if working
 	addressState.leaderAddr = newLeaderConn.LocalAddr().String()
 	initializeLeaderConnection()
+	electionState = NORMAL
+	fmt.Println("New leader elected")
 }
 
