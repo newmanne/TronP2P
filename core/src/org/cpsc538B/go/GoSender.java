@@ -127,6 +127,7 @@ public class GoSender implements Disposable {
         final String jsonString = JSONUtils.toString(event);
         Gdx.app.log(TronP2PGame.SERVER_TAG, "Sending message: " + jsonString);
         goOutputStream.println(jsonString);
+	Gdx.app.log(TronP2PGame.SERVER_TAG, "Sending message: " + jsonString);
     }
 
     public void sendToGo(String string) {

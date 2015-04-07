@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	//	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -37,7 +36,7 @@ type Move struct {
 }
 
 type GameState struct {
-	//refacotr this
+	//refactor this
 	LeaderID       int
 	Round          int
 	MyPid          int
@@ -198,7 +197,6 @@ func min(a, b int) int {
 /*
 * LOG UTILITIES
  */
-
 func log(message string) {
 	fmt.Println(message)
 }
@@ -277,7 +275,6 @@ func broadcastMessage(conn *net.UDPConn, message []byte) {
 /*
 * MESSAGE CONSTRUCTORS
  */
-
 func newRoundMessage() []byte {
 	gameState.Round++
 	message := RoundStartMessage{
@@ -335,7 +332,6 @@ func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
 /*
 * INIT FUNCTIONS
  */
-
 func CreateInitPlayerPosition() Move {
 	var direction string
 	directionId := randomInt(0, 4)
@@ -547,7 +543,7 @@ func isGameOverMessage(buf []byte) bool {
 
 /*
 * UTILITY FUNCTIONS
- */
+*/
 
 func checkError(err error) {
 	if err != nil {
@@ -713,7 +709,6 @@ func main() {
 /*
 * Routines
 */
-
 func leaderListener(conn *net.UDPConn) {
 	defer conn.Close()
 	var roundMoves MovesMessage
@@ -749,7 +744,6 @@ func leaderListener(conn *net.UDPConn) {
 		}
 		byt := encodeMessage(roundMoves)
 		broadcastMessage(conn, byt)
-
 	}
 }
 
@@ -833,7 +827,6 @@ func goClient(wg sync.WaitGroup) {
 		}
 	}
 	logClient("Cloosing Client")
-
 }
 
 func javaGoConnection(wg sync.WaitGroup) {
@@ -841,24 +834,31 @@ func javaGoConnection(wg sync.WaitGroup) {
 	initializeJavaConnection()
 	defer addressState.javaConnection.Close()
 	for {
-		logJava("Waiting for message from go client")
-		message := <-addressState.recvChan
-		logJava("Sending the following message to java:" + string(message))
-		addressState.javaConnection.Write(append(message, '\n'))
-		if isGameOverMessage(message) {
-			logJava("A Game Over was sent to java. My work here is done. Goodbye")
+		message := <- addressState.recvChan
+		messageType := getMessageType(message)
+		switch messageType {
+		case "roundstart":
+			logJava("Sending the following message to java:" + string(message))
+			addressState.javaConnection.Write(append(message, '\n'))
+			logJava("Message has been sent to java")
+			if isGameOverMessage(message) {
+				logJava("A Game Over was sent to java. My work here is done. Goodbye")
+				break
+			}
+			// read some reply from the java game (update of move, or death)
+			time.Sleep(MIN_GAME_SPEED)
+			status, err := addressState.connBuf.ReadString('\n')
+			checkError(err)
+			logJava("Received from java " + status)
+			addressState.sendChan <- []byte(status)
 			break
+		case "moves":
+			logJava("Reply from java " + string(message))
+			addressState.javaConnection.Write(append(message, '\n'))
+			break
+		default:
+			panic("Message from java not recognized: " + messageType)
 		}
-		// read some reply from the java game (update of move, or death)
-		time.Sleep(MIN_GAME_SPEED)
-		status, err := addressState.connBuf.ReadString('\n')
-		logJava("Received: " + status)
-		checkError(err)
-		// send buf to leader channel
-		addressState.sendChan <- []byte(status)
-		reply := <-addressState.recvChan
-		addressState.javaConnection.Write(append(reply, '\n'))
-		checkError(err)
 	}
 }
 
@@ -892,7 +892,6 @@ func startElection(bufChan chan []byte) {
 		electNewLeader()
 	}
 }
-
 
 func electNewLeader() {
 	newLeaderConn := initializeLeader(":0")

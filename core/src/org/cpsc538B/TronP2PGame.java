@@ -28,7 +28,7 @@ public class TronP2PGame extends Game {
     private Map<String, String> nicknames;
 
     public final static String LOG_TAG = "TRON";
-    public final static String SERVER_TAG = "SERVER";
+    public final static String SERVER_TAG = "JAVA";
     public final static String GO_STDOUT_TAG = "GO_STDOUT";
     public final static String GO_STDERR_TAG = "GO_STDERR";
 
