@@ -19,8 +19,8 @@ var addressState AddressState
 var electionState = NORMAL
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var MIN_GAME_SPEED = (1000 / 60) * time.Millisecond      // time between every new java move
-var FOLLOWER_RESPONSE_TIME = 500 * time.Millisecond      // time for followers to respond
+var MIN_GAME_SPEED = (1000 / 2) * time.Millisecond      // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 500*2 * time.Millisecond      // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
 
@@ -37,6 +37,8 @@ type Move struct {
 }
 
 type GameState struct {
+	//refacotr this
+	LeaderID       int
 	Round          int
 	MyPid          int
 	MyPriority     int
@@ -130,6 +132,7 @@ type LeaderElectionMessage struct {
 	MessageType string `json:"messageType"`
 	EventName   string `json:"eventName"`
 	Round       int    `json:"round"`
+	LeaderID    int    `json:"leaderid"`
 }
 
 type ElectionState int
@@ -464,6 +467,7 @@ func initializeJavaConnection() {
 func initializeGameState() {
 	var err error
 	rand.Seed(time.Now().Unix())
+	gameState.LeaderID = 0
 	gameState.Round = 1
 	gameState.GridWidth, err = strconv.Atoi(os.Args[4])
 	checkError(err)
@@ -761,10 +765,12 @@ func goClient(wg sync.WaitGroup) {
 		buf, raddr, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
 		if timedout {
 			if electionState == NORMAL {
+				fmt.Println("new election")
 				electionState = QUORUM
 				bufChan = make(chan []byte, 1)
 				go func() {
 					time.Sleep(FOLLOWER_RESPONSE_TIME)
+					electionState = NORMAL
 					close(bufChan)
 				}()
 				go startElection(bufChan)
@@ -791,23 +797,28 @@ func goClient(wg sync.WaitGroup) {
 			logClient("Cloosing Client")
 			break
 		case "newleader":
+			fmt.Println("Notified about new leader")
+			electionState = NORMAL
 			break
 		case "checkleader":
 			var message LeaderElectionMessage
+			//TODO add a condition on leaderid
 			if gameState.Round > getRoundNumber(buf) {
 				message = LeaderElectionMessage{
 					MessageType: "leaderalive",
 					Round: gameState.Round,
+					LeaderID: gameState.LeaderID,
 				}
 			} else {
 				pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()])
 				if electionState == QUORUM && pid < gameState.MyPid {
-					//stop my election
+					electionState = NORMAL
+					close(bufChan)
 				}
 				message = LeaderElectionMessage{
 					MessageType: "leaderdead",
 					Round: gameState.Round,
-					
+					LeaderID: gameState.LeaderID,
 				}
 			}
 			byt := encodeMessage(message)
@@ -821,7 +832,7 @@ func goClient(wg sync.WaitGroup) {
 			panic("Cannot understand message type: " + messageType)
 		}
 	}
-	logClient("Cloosng Client")
+	logClient("Cloosing Client")
 
 }
 
@@ -856,14 +867,16 @@ func javaGoConnection(wg sync.WaitGroup) {
 */
 
 func startElection(bufChan chan []byte) {
+	electionState = QUORUM
 	message := LeaderElectionMessage{
 		MessageType: "checkleader",
 		Round: gameState.Round,
+		LeaderID: gameState.LeaderID,
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(addressState.goConnection, byt)
-	received := 0
-	positive := 0
+	received := 1
+	positive := 1
 	for {
 		buf, timedout := <- bufChan
 		if timedout || received == len(gameState.AddrToPid) - 2 {
@@ -883,19 +896,21 @@ func startElection(bufChan chan []byte) {
 
 func electNewLeader() {
 	newLeaderConn := initializeLeader(":0")
+	gameState.LeaderID++
 	message := LeaderElectionMessage{
 		MessageType: "newleader",
 		Round: gameState.Round,
+		LeaderID: gameState.LeaderID,
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(newLeaderConn, byt)
-	time.Sleep(100*time.Millisecond)
+	time.Sleep(1000*time.Millisecond)
 	go leaderListener(newLeaderConn)
 	//TODO sleep might be needed
 	//TODO not sure if working
 	addressState.leaderAddr = newLeaderConn.LocalAddr().String()
 	initializeLeaderConnection()
-	electionState = NORMAL
+	//electionState = NORMAL
 	fmt.Println("New leader elected")
 }
 
