@@ -113,6 +113,7 @@ public class GameScreen extends ScreenAdapter {
                 game.getGoSender().sendToGo(new GoSender.MoveEvent(tronInput.getProvisionalDirection(), pid, round));
             } else if (event instanceof GoSender.MovesEvent) {
                 // process moves
+                // TODO: move this logic (window sliding) into go
                 final GoSender.MovesEvent movesEvent = (GoSender.MovesEvent) event;
                 final int messageRound = movesEvent.getRound();
                 final int numRoundsToUpdate = Math.min(messageRound - lastUpdatedRound, movesEvent.getMoves().size());
