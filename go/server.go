@@ -1,6 +1,7 @@
 package main
 
 import (
+//	"reflect"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -264,6 +265,12 @@ func getRoundNumber(buf []byte) (round int) {
 	return
 }
 
+func getMoves(buf []byte) (moves []interface{}) {
+	dat := decodeMessage(buf)
+	moves = dat["moves"].(map[string]interface{})["moves"].([]interface{})
+	return
+}
+
 func broadcastMessage(conn *net.UDPConn, message []byte) {
 	for _, addr := range gameState.AddrToAddr {
 		_, err := conn.WriteToUDP(message, addr)
@@ -317,6 +324,7 @@ func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
 	broadcastMessage(conn, newRoundMessage)
 	logLeader("done sending round start messages.")
 	slideWindow()
+	fmt.Println(gameState.Positions)
 	roundMoves = MovesMessage{
 		MessageType: "moves",
 		EventName:   "moves",
@@ -326,6 +334,8 @@ func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
 			Round: gameState.Round,
 		},
 	}
+	fmt.Println(roundMoves)
+	fmt.Println(decodeMessage(encodeMessage(roundMoves)))
 	return
 }
 
@@ -581,12 +591,17 @@ func getCurrentMoveMap() map[string]Move {
 }
 
 func slideWindow() {
+	fmt.Println("Sliding window")
+	fmt.Println(gameState.Positions)
 	// push everything back
 	for i := 0; i < len(gameState.Positions)-1; i++ {
 		gameState.Positions[i] = gameState.Positions[i+1]
 	}
 	// clear final move
+	fmt.Println(gameState.Positions)
 	gameState.Positions[len(gameState.Positions)-1] = make(map[string]Move)
+	fmt.Println(gameState.Positions)
+	fmt.Println("Sliding done")
 }
 
 //TODO Change this name
@@ -599,7 +614,10 @@ func addContinuedMove(pid string) {
 // results in collision, the player dies.
 func makeMove(direction string, pid string) Move {
 	//TODO what about a linked list?
+	fmt.Println("Making move " + direction + " " + pid)
 	prevMove := gameState.Positions[len(gameState.Positions)-2][pid]
+	fmt.Println(gameState.Positions)
+	fmt.Println(prevMove)
 	var nextMove Move
 	if gameState.Alive[pid] {
 		nextMove = Move{
@@ -630,7 +648,8 @@ func makeMove(direction string, pid string) Move {
 		nextMove = prevMove
 	}
 	getCurrentMoveMap()[pid] = nextMove
-
+	fmt.Println("move made")
+	fmt.Println(gameState.Positions)
 	return nextMove
 }
 
@@ -715,6 +734,8 @@ func leaderListener(conn *net.UDPConn) {
 	var timeoutTimeForRound time.Time
 	for {
 		roundMoves = newRound(conn)
+		fmt.Println("here")
+		fmt.Println(roundMoves)
 		timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 		for {
 			logLeader("Waiting to receive message from follower...")
@@ -726,7 +747,6 @@ func leaderListener(conn *net.UDPConn) {
 			if round == gameState.Round && !gameState.DroppedForever[pid] {
 				if surviveFollowerResponseInjectedFailure(pid) {
 					move := makeMove(direction, pid)
-					getCurrentMoveMap()[pid] = move
 					logLeader("Received move message " + string(encodeMessage(move)) +
 						" from player " + pid)
 					if timeToRespond() {
@@ -742,7 +762,10 @@ func leaderListener(conn *net.UDPConn) {
 		if gameOver() {
 			break
 		}
+		fmt.Println("message to be sent")
+		fmt.Println(roundMoves)
 		byt := encodeMessage(roundMoves)
+		fmt.Println(decodeMessage(byt))
 		broadcastMessage(conn, byt)
 	}
 }
@@ -758,6 +781,7 @@ func goClient(wg sync.WaitGroup) {
 		timeoutTimeForRound := time.Now().Add(FOLLOWER_RESPONSE_TIME)
 		buf, raddr, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
 		if timedout {
+			fmt.Println("timedout")
 			if electionState == NORMAL {
 				fmt.Println("new election")
 				electionState = QUORUM
@@ -771,11 +795,11 @@ func goClient(wg sync.WaitGroup) {
 			}
 			continue
 		}
-
 		//might be usefull to move it to a separate routine? if it gets slow, that is
 		messageType := getMessageType(buf)
 		switch messageType {
 		case "roundstart":
+			fmt.Println("Message " + string(buf))
 			addressState.recvChan <- buf
 			gameState.Round = getRoundNumber(buf)
 			message := <-addressState.sendChan
@@ -783,6 +807,24 @@ func goClient(wg sync.WaitGroup) {
 			checkError(err)
 			break
 		case "moves":
+			fmt.Println("Message " + string(buf))
+			fmt.Println("moves")
+			fmt.Println(getMoves(buf))
+			fmt.Println(gameState.Positions)
+			for index, moves := range getMoves(buf) {
+				positions := gameState.Positions[index]
+				for pid, move := range moves.(map[string]interface{}) {
+					castedMove := move.(map[string]interface{})
+					fmt.Println(index, pid)
+					positions[pid] = Move{
+						Direction: castedMove["direction"].(string),
+						X: int(castedMove["x"].(float64)),
+						Y: int(castedMove["y"].(float64)),
+						
+					}
+				}
+			}
+			fmt.Println(gameState.Positions)
 			addressState.recvChan <- buf
 			break
 		case "gameover":
@@ -851,6 +893,7 @@ func javaGoConnection(wg sync.WaitGroup) {
 			checkError(err)
 			logJava("Received from java " + status)
 			addressState.sendChan <- []byte(status)
+			fmt.Println("sent")
 			break
 		case "moves":
 			logJava("Reply from java " + string(message))
@@ -907,7 +950,8 @@ func electNewLeader() {
 	go leaderListener(newLeaderConn)
 	//TODO sleep might be needed
 	//TODO not sure if working
-	addressState.leaderAddr = newLeaderConn.LocalAddr().String()
+	splitAddress := strings.Split(newLeaderConn.LocalAddr().String(), ":")
+	addressState.leaderAddr = "localhost:" + splitAddress[len(splitAddress)-1]
 	initializeLeaderConnection()
 	//electionState = NORMAL
 	fmt.Println("New leader elected")
