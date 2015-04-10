@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -16,12 +17,16 @@ import (
 var gameState GameState
 var addressState AddressState
 var electionState = NORMAL
+var lastTime time.Time
+
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var MIN_GAME_SPEED = (1000 / 2) * time.Millisecond      // time between every new java move
-var FOLLOWER_RESPONSE_TIME = 500*2 * time.Millisecond      // time for followers to respond
+var MIN_GAME_SPEED = (1000 / 2) * time.Millisecond       // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 500 * 2 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
+var LATENCY_FILENAME = "latency.csv"
+var OVERHEAD_FILENAME = "overhead.csv"
 
 // STRUCTURES
 type MyMove struct {
@@ -150,6 +155,8 @@ func readFromUDPWithTimeout(conn *net.UDPConn, timeoutTime time.Time) ([]byte, *
 	buf := make([]byte, 4096)
 	conn.SetReadDeadline(timeoutTime)
 	n, raddr, err := conn.ReadFromUDP(buf)
+	recordOverhead(n)
+
 	if err != nil {
 		if e, ok := err.(net.Error); !ok || !e.Timeout() {
 			checkError(err)
@@ -167,6 +174,8 @@ func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
 	buf := make([]byte, 4096)
 	n, raddr, err := conn.ReadFromUDP(buf)
 	checkError(err)
+	recordOverhead(n)
+
 	return buf[0:n], raddr
 }
 
@@ -211,6 +220,41 @@ func logLeader(message string) {
 
 func logClient(message string) {
 	log("GOCLIENT: " + message)
+}
+
+/*
+* PERFORMANCE METRIC UTILITIES
+ */
+// TODO: measure at different failure rates, write to csv file
+
+// what is the smoothness/time delta between consecutive rounds?
+func recordLatency() {
+	diff := time.Since(lastTime)
+
+	csvfile, err := os.OpenFile(LATENCY_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
+	checkError(err)
+	defer csvfile.Close()
+	writer := csv.NewWriter(csvfile)
+
+	err = writer.Write([]string{strconv.Itoa(gameState.Round),
+		strconv.Itoa(gameState.MyPid), strconv.FormatInt(diff.Nanoseconds(), 10)})
+	checkError(err)
+	writer.Flush()
+
+	lastTime = time.Now()
+}
+
+// length of messages received by this player by round
+func recordOverhead(overhead int) {
+	csvfile, err := os.OpenFile(OVERHEAD_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
+	checkError(err)
+	defer csvfile.Close()
+	writer := csv.NewWriter(csvfile)
+
+	err = writer.Write([]string{strconv.Itoa(gameState.Round),
+		strconv.Itoa(gameState.MyPid), strconv.Itoa(overhead)})
+	checkError(err)
+	writer.Flush()
 }
 
 /*
@@ -313,6 +357,7 @@ func endGameMessage() GameOverMessage {
 }
 
 func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
+	recordLatency()
 	newRoundMessage := newRoundMessage()
 	broadcastMessage(conn, newRoundMessage)
 	logLeader("done sending round start messages.")
@@ -413,10 +458,10 @@ func initializeLeaderConnection() {
 	addressState.leaderUDPAddr = leaderUDPAddr
 }
 
-func contactLeader(){
+func contactLeader() {
 	initializeLeaderConnection()
 	logClient("Sending a hello message to the leader")
-	_, err := addressState.goConnection.WriteToUDP([]byte("JOIN:"+ gameState.Nickname),
+	_, err := addressState.goConnection.WriteToUDP([]byte("JOIN:"+gameState.Nickname),
 		addressState.leaderUDPAddr)
 	checkError(err)
 	if addressState.isLeader {
@@ -495,6 +540,18 @@ func initializeGameState() {
 	addressState.recvChan = make(chan []byte, 1)
 }
 
+func initializePerformanceMetrics() {
+	latencyFile, err := os.Create(LATENCY_FILENAME)
+	checkError(err)
+	defer latencyFile.Close()
+
+	overheadFile, err := os.Create(OVERHEAD_FILENAME)
+	checkError(err)
+	defer overheadFile.Close()
+
+	lastTime = time.Now()
+}
+
 /*
 * CHECK FUNCTIONS
  */
@@ -503,7 +560,7 @@ func gameOver() bool {
 	if DISABLE_GAME_OVER {
 		return false
 	}
-	//TODO the following two lines don't make sense.
+	//TODO the following two  don't make sense.
 	numDeadToEnd := len(gameState.AddrToPid) - 1
 	logLeader("There are " + strconv.Itoa(len(gameState.Finish)) + " dead players and we require at least " +
 		strconv.Itoa(numDeadToEnd) + " dead players to call it a game")
@@ -543,7 +600,7 @@ func isGameOverMessage(buf []byte) bool {
 
 /*
 * UTILITY FUNCTIONS
-*/
+ */
 
 func checkError(err error) {
 	if err != nil {
@@ -665,7 +722,6 @@ func timeToRespond() bool {
 	return false
 }
 
-//TODO No comment.
 func isCollision(x, y int) bool {
 	if !COLLISION_IS_DEATH {
 		return false
@@ -687,7 +743,10 @@ func main() {
 	if len(os.Args) != 7 {
 		panic("RTFM")
 	}
+
+	initializePerformanceMetrics()
 	initializeGameState()
+
 	if addressState.isLeader {
 		go func() {
 			conn := initializeLeader(addressState.leaderAddr)
@@ -708,7 +767,7 @@ func main() {
 
 /*
 * Routines
-*/
+ */
 func leaderListener(conn *net.UDPConn) {
 	defer conn.Close()
 	var roundMoves MovesMessage
@@ -800,8 +859,8 @@ func goClient(wg sync.WaitGroup) {
 			if gameState.Round > getRoundNumber(buf) {
 				message = LeaderElectionMessage{
 					MessageType: "leaderalive",
-					Round: gameState.Round,
-					LeaderID: gameState.LeaderID,
+					Round:       gameState.Round,
+					LeaderID:    gameState.LeaderID,
 				}
 			} else {
 				pid, _ := strconv.Atoi(gameState.AddrToPid[raddr.String()])
@@ -811,8 +870,8 @@ func goClient(wg sync.WaitGroup) {
 				}
 				message = LeaderElectionMessage{
 					MessageType: "leaderdead",
-					Round: gameState.Round,
-					LeaderID: gameState.LeaderID,
+					Round:       gameState.Round,
+					LeaderID:    gameState.LeaderID,
 				}
 			}
 			byt := encodeMessage(message)
@@ -834,7 +893,7 @@ func javaGoConnection(wg sync.WaitGroup) {
 	initializeJavaConnection()
 	defer addressState.javaConnection.Close()
 	for {
-		message := <- addressState.recvChan
+		message := <-addressState.recvChan
 		messageType := getMessageType(message)
 		switch messageType {
 		case "roundstart":
@@ -864,22 +923,22 @@ func javaGoConnection(wg sync.WaitGroup) {
 
 /*
 * Leader election
-*/
+ */
 
 func startElection(bufChan chan []byte) {
 	electionState = QUORUM
 	message := LeaderElectionMessage{
 		MessageType: "checkleader",
-		Round: gameState.Round,
-		LeaderID: gameState.LeaderID,
+		Round:       gameState.Round,
+		LeaderID:    gameState.LeaderID,
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(addressState.goConnection, byt)
 	received := 1
 	positive := 1
 	for {
-		buf, timedout := <- bufChan
-		if timedout || received == len(gameState.AddrToPid) - 2 {
+		buf, timedout := <-bufChan
+		if timedout || received == len(gameState.AddrToPid)-2 {
 			break
 		}
 		messageType := getMessageType(buf)
@@ -888,7 +947,7 @@ func startElection(bufChan chan []byte) {
 			positive++
 		}
 	}
-	if positive > received / 2 {
+	if positive > received/2 {
 		electNewLeader()
 	}
 }
@@ -898,12 +957,12 @@ func electNewLeader() {
 	gameState.LeaderID++
 	message := LeaderElectionMessage{
 		MessageType: "newleader",
-		Round: gameState.Round,
-		LeaderID: gameState.LeaderID,
+		Round:       gameState.Round,
+		LeaderID:    gameState.LeaderID,
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(newLeaderConn, byt)
-	time.Sleep(1000*time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 	go leaderListener(newLeaderConn)
 	//TODO sleep might be needed
 	//TODO not sure if working
@@ -912,4 +971,3 @@ func electNewLeader() {
 	//electionState = NORMAL
 	fmt.Println("New leader elected")
 }
-
