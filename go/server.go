@@ -1,7 +1,8 @@
 package main
 
 import (
-//	"reflect"
+	//	"reflect"
+	"runtime/debug"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -566,6 +567,7 @@ func isGameOverMessage(buf []byte) bool {
 
 func checkError(err error) {
 	if err != nil {
+		debug.PrintStack()
 		fmt.Fprintf(os.Stderr, "Error ", err.Error())
 		os.Exit(1)
 	}
@@ -891,6 +893,7 @@ func javaGoConnection(wg sync.WaitGroup) {
 	for {
 		message := <- addressState.recvChan
 		messageType := getMessageType(message)
+		fmt.Println("SENDING TO JAVA THIS", decodeMessage(message))
 		switch messageType {
 		case "roundstart":
 			logJava("Sending the following message to java:" + string(message))
@@ -909,13 +912,13 @@ func javaGoConnection(wg sync.WaitGroup) {
 			fmt.Println("sent")
 			break
 		case "moves":
-			logJava("Reply from java " + string(message))
 			addressState.javaConnection.Write(append(message, '\n'))
 			break
 		default:
 			panic("Message from java not recognized: " + messageType)
 		}
 	}
+	fmt.Println("Java connection closed")
 }
 
 /*
@@ -935,9 +938,16 @@ func startElection(bufChan chan []byte) {
 	positive := 1
 	for {
 		buf, timedout := <- bufChan
-		if timedout || received == len(gameState.AddrToPid) - 2 {
+		fmt.Println("#############################")
+		fmt.Println(timedout)
+		fmt.Println(buf)
+		if !timedout || received == len(gameState.AddrToPid) - 2 {
 			break
 		}
+		fmt.Println("#############################")
+		fmt.Println(timedout)
+		fmt.Println(buf)
+		fmt.Println(len(buf))
 		messageType := getMessageType(buf)
 		received++
 		if messageType == "leaderdead" {
