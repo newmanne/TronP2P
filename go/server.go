@@ -270,6 +270,13 @@ func getRoundNumber(buf []byte) (round int) {
 	return
 }
 
+func getLeaderID(buf []byte) (ID int) {
+	dat := decodeMessage(buf)
+	IDString, _ := dat["leaderid"].(float64)
+	ID = int(IDString)
+	return
+}
+
 func getMoves(buf []byte) (moves []interface{}) {
 	dat := decodeMessage(buf)
 	moves = dat["moves"].(map[string]interface{})["moves"].([]interface{})
@@ -780,8 +787,8 @@ func goClient(wg sync.WaitGroup) {
 		if timedout {
 			fmt.Println("timedout")
 			if electionState == NORMAL {
-				fmt.Println("new election")
 				electionState = QUORUM
+				fmt.Println("new election")
 				bufChan = make(chan []byte, 1)
 				go func() {
 					time.Sleep(FOLLOWER_RESPONSE_TIME)
@@ -832,7 +839,7 @@ func goClient(wg sync.WaitGroup) {
 		case "checkleader":
 			var message LeaderElectionMessage
 			//TODO add a condition on leaderid
-			if gameState.Round > getRoundNumber(buf) {
+			if gameState.Round > getRoundNumber(buf) || gameState.LeaderID > getLeaderID(buf) {
 				message = LeaderElectionMessage{
 					MessageType: "leaderalive",
 					Round:       gameState.Round,
@@ -855,7 +862,9 @@ func goClient(wg sync.WaitGroup) {
 			checkError(err)
 			break
 		case "leaderalive", "leaderdead":
-			bufChan <- buf
+			if gameState.LeaderID >= getLeaderID(buf) {
+				bufChan <- buf
+			}
 			break
 		default:
 			panic("Cannot understand message type: " + messageType)
@@ -901,11 +910,11 @@ func javaGoConnection(wg sync.WaitGroup) {
  */
 
 func startElection(bufChan chan []byte) {
-	electionState = QUORUM
+	leaderID := gameState.LeaderID
 	message := LeaderElectionMessage{
 		MessageType: "checkleader",
 		Round:       gameState.Round,
-		LeaderID:    gameState.LeaderID,
+		LeaderID:    leaderID,
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(addressState.goConnection, byt)
@@ -913,21 +922,27 @@ func startElection(bufChan chan []byte) {
 	positive := 1
 	for {
 		buf, timedout := <-bufChan
-		if timedout || received == len(gameState.AddrToPid)-2 {
+		if !timedout {
 			break
 		}
 		fmt.Println("#############################")
 		fmt.Println(timedout)
 		fmt.Println(buf)
 		fmt.Println(len(buf))
-		messageType := getMessageType(buf)
+		if getLeaderID(buf) > leaderID {
+			return
+		}
 		received++
-		if messageType == "leaderdead" {
+		if getMessageType(buf) == "leaderdead" {
 			positive++
+		}
+		if received == len(gameState.AddrToPid)-2 {
+			break
 		}
 	}
 	if positive > received/2 {
 		electNewLeader()
+
 	}
 }
 
