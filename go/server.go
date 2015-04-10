@@ -21,8 +21,8 @@ var leaderState LeaderState
 var electionState = NORMAL
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var MIN_GAME_SPEED = (1000 / 2) * time.Millisecond       // time between every new java move
-var FOLLOWER_RESPONSE_TIME = 500 * 2 * time.Millisecond  // time for followers to respond
+var MIN_GAME_SPEED = 1000/4 * time.Millisecond       // time between every new java move
+var FOLLOWER_RESPONSE_TIME = 500 * 4 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
 
@@ -60,6 +60,7 @@ type GameState struct {
 
 type LeaderState struct {
 	Positions []map[string]Move
+	leaderConnection *net.UDPConn
 }
 
 type AddressState struct {
@@ -92,9 +93,10 @@ type MyMoveMessage struct {
 	MyMove      `json:"myMove"`
 }
 
-type MyDeathMessage struct {
+type KillPlayerMessage struct {
 	MessageType string `json:"messageType"`
 	EventName   string `json:"eventName"`
+	PlayerPID   string `json:"playerpid"`
 	Round       int    `json:"round"`
 }
 
@@ -257,6 +259,12 @@ func parseMessage(buf []byte) (string, string, int) {
 	return direction, pid, round
 }
 
+func getPID(buf []byte) (pid string) {
+	dat := decodeMessage(buf)
+	pid = dat["playerpid"].(string)
+	return
+}
+
 func getMessageType(buf []byte) (messageType string) {
 	dat := decodeMessage(buf)
 	messageType = dat["messageType"].(string)
@@ -389,10 +397,10 @@ func registerNewPlayer(raddr *net.UDPAddr, buf []byte) {
 		"," + strconv.Itoa(getLeaderMoveMap()[pid].Y))
 }
 
-func initLobby(conn *net.UDPConn) {
+func initLobby() {
 	for {
 		logLeader("Waiting for a client to join or send a start game message")
-		buf, raddr := readFromUDP(conn)
+		buf, raddr := readFromUDP(leaderState.leaderConnection)
 		if isJoinMessage(buf) {
 			address := raddr.String()
 			if _, knownPlayer := gameState.AddrToPid[address]; !knownPlayer {
@@ -403,7 +411,7 @@ func initLobby(conn *net.UDPConn) {
 			for addr, pid := range gameState.AddrToPid {
 				newGameMsg := encodeMessage(startGameMessage(pid, getLeaderMoveMap()))
 				logLeader("Sending a game start message to " + addr + ". " + string(newGameMsg))
-				_, err := conn.WriteToUDP(newGameMsg, gameState.AddrToAddr[addr])
+				_, err := leaderState.leaderConnection.WriteToUDP(newGameMsg, gameState.AddrToAddr[addr])
 				checkError(err)
 			}
 			break
@@ -413,30 +421,34 @@ func initLobby(conn *net.UDPConn) {
 	}
 }
 
-func initializeLeader(leaderAddrString string) (conn *net.UDPConn) {
+func initializeLeader(leaderAddrString string) () {
 	leaderState.Positions = make([]map[string]Move, MAX_ALLOWABLE_MISSED_MESSAGES)
 	for i := 0; i < len(leaderState.Positions); i++ {
 		leaderState.Positions[i] = make(map[string]Move)
 	}
 	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
 	checkError(err)
-	conn, err = net.ListenUDP("udp", leaderAddr)
+	conn, err := net.ListenUDP("udp", leaderAddr)
 	checkError(err)
-	return
+	leaderState.leaderConnection = conn
 }
 
-func initializeLeaderConnection() {
+func initializeConnection() {
 	addr, err := net.ResolveUDPAddr("udp", "localhost:0")
 	checkError(err)
 	conn, err := net.ListenUDP("udp", addr)
 	checkError(err)
+	addressState.goConnection = conn
+}
+
+func initializeLeaderConnection() {
 	leaderUDPAddr, err := net.ResolveUDPAddr("udp", addressState.leaderAddr)
 	checkError(err)
-	addressState.goConnection = conn
 	addressState.leaderUDPAddr = leaderUDPAddr
 }
 
 func contactLeader() {
+	initializeConnection()
 	initializeLeaderConnection()
 	logClient("Sending a hello message to the leader")
 	_, err := addressState.goConnection.WriteToUDP([]byte("JOIN:"+gameState.Nickname),
@@ -460,6 +472,7 @@ func contactLeader() {
 		checkError(err)
 		gameState.AddrToPid[addr] = pid.(string)
 		gameState.AddrToAddr[addr] = raddr
+		gameState.Alive[pid.(string)] = true
 	}
 	addressState.recvChan <- buf
 }
@@ -617,6 +630,7 @@ func slideWindow() {
 	// clear final move
 	leaderState.Positions[len(leaderState.Positions)-1] = make(map[string]Move)
 	fmt.Println(leaderState.Positions)
+	fmt.Println("slide done")
 }
 
 //TODO Change this name
@@ -630,6 +644,7 @@ func addContinuedMove(pid string) {
 // results in collision, the player dies.
 func makeMove(direction string, pid string) Move {
 	prevMove := leaderState.Positions[len(leaderState.Positions)-2][pid]
+	fmt.Println("Make move", direction, pid, prevMove)
 	var nextMove Move
 	if gameState.Alive[pid] {
 		nextMove = Move{
@@ -637,21 +652,35 @@ func makeMove(direction string, pid string) Move {
 			X:         prevMove.X,
 			Y:         prevMove.Y,
 		}
+		fmt.Println(nextMove)
 		switch nextMove.Direction {
 		case "DOWN":
+			fmt.Println("DOWN")
 			nextMove.Y = max(1, nextMove.Y-1)
 		case "UP":
+			fmt.Println("UP")
 			nextMove.Y = min(gameState.GridHeight-2, nextMove.Y+1)
 		case "LEFT":
+			fmt.Println("LEFT")
 			nextMove.X = max(1, nextMove.X-1)
 		case "RIGHT":
+			fmt.Println("RIGHT")
 			nextMove.X = min(gameState.GridWidth-2, nextMove.X+1)
 		default:
 			panic("Next move direction unknown")
 		}
 
+		fmt.Println(nextMove)
 		if isCollision(nextMove.X, nextMove.Y) {
-			killPlayer(pid)
+			
+			//killPlayer(pid)
+			message := KillPlayerMessage{
+				MessageType: "killplayer",
+				EventName: "killplayer",
+				PlayerPID: pid,
+				Round: gameState.Round,
+			}
+			broadcastMessage(leaderState.leaderConnection, encodeMessage(message))
 			nextMove = prevMove
 		} else {
 			gameState.Grid[nextMove.X][nextMove.Y], _ = strconv.Atoi(pid)
@@ -659,7 +688,11 @@ func makeMove(direction string, pid string) Move {
 	} else { // Player is dead, keep old move.
 		nextMove = prevMove
 	}
+	fmt.Println("done")
+	fmt.Println(nextMove)
+	fmt.Println(getLeaderMoveMap())
 	getLeaderMoveMap()[pid] = nextMove
+	fmt.Println(getLeaderMoveMap())
 	return nextMove
 }
 
@@ -698,8 +731,12 @@ func isCollision(x, y int) bool {
 	if !COLLISION_IS_DEATH {
 		return false
 	} else if (0 <= x && x < gameState.GridWidth) && (0 <= y && y < gameState.GridHeight) {
+		if gameState.Grid[x][y] != 0 {
+			fmt.Println("                      collision at", x, y, gameState.Grid[x][y])
+		}
 		return gameState.Grid[x][y] != 0
 	} else {
+		fmt.Println("                      collision out of bound")
 		return true
 	}
 }
@@ -718,10 +755,10 @@ func main() {
 	initializeGameState()
 	if addressState.isLeader {
 		go func() {
-			conn := initializeLeader(addressState.leaderAddr)
+			initializeLeader(addressState.leaderAddr)
 			logLeader("Leader has started")
-			initLobby(conn)
-			go leaderListener(conn)
+			initLobby()
+			go leaderListener()
 		}()
 		//TODO i'm pretty sure there's a better way than that
 		time.Sleep(100 * time.Millisecond) // stupid hack to make sure the leader is up before the client
@@ -737,16 +774,17 @@ func main() {
 /*
 * Routines
  */
-func leaderListener(conn *net.UDPConn) {
-	defer conn.Close()
+func leaderListener() {
+	defer leaderState.leaderConnection.Close()
 	var roundMoves MovesMessage
 	var timeoutTimeForRound time.Time
 	for {
-		roundMoves = newRound(conn)
+		roundMoves = newRound(leaderState.leaderConnection)
+		fmt.Println("newRoundMoves", roundMoves)
 		timeoutTimeForRound = time.Now().Add(FOLLOWER_RESPONSE_TIME)
 		for {
 			logLeader("Waiting to receive message from follower...")
-			buf, _, timedout := readFromUDPWithTimeout(conn, timeoutTimeForRound)
+			buf, _, timedout := readFromUDPWithTimeout(leaderState.leaderConnection, timeoutTimeForRound)
 			if timedout {
 				break
 			}
@@ -770,7 +808,8 @@ func leaderListener(conn *net.UDPConn) {
 			break
 		}
 		byt := encodeMessage(roundMoves)
-		broadcastMessage(conn, byt)
+		fmt.Println("roundmvoes", roundMoves)
+		broadcastMessage(leaderState.leaderConnection, byt)
 	}
 }
 
@@ -782,10 +821,18 @@ func goClient(wg sync.WaitGroup) {
 	defer addressState.goConnection.Close()
 	logClient("Waiting for leader to respond with game start details")
 	for !gameOver {
+		fmt.Println("setitng up timeout", time.Now(), FOLLOWER_RESPONSE_TIME)
 		timeoutTimeForRound := time.Now().Add(FOLLOWER_RESPONSE_TIME)
+		fmt.Println(timeoutTimeForRound)
+		leaderID := gameState.LeaderID
 		buf, raddr, timedout := readFromUDPWithTimeout(addressState.goConnection, timeoutTimeForRound)
 		if timedout {
-			fmt.Println("timedout")
+			fmt.Println(time.Now())
+			if leaderID != gameState.LeaderID {
+				fmt.Println("$$$$$$$$$$$$$$$$$$")
+				continue
+			}
+			fmt.Println("timedout", gameState.LeaderID, leaderID)
 			if electionState == NORMAL {
 				electionState = QUORUM
 				fmt.Println("new election")
@@ -802,6 +849,9 @@ func goClient(wg sync.WaitGroup) {
 		//might be usefull to move it to a separate routine? if it gets slow, that is
 		messageType := getMessageType(buf)
 		switch messageType {
+		case "killplayer":
+			//check round rumber?
+			killPlayer(getPID(buf))
 		case "roundstart":
 			logClient("Round start message: " + string(buf))
 			addressState.recvChan <- buf
@@ -833,7 +883,10 @@ func goClient(wg sync.WaitGroup) {
 			logClient("Cloosing Client")
 			break
 		case "newleader":
-			fmt.Println("Notified about new leader")
+			fmt.Println("Notified about new leader", raddr.String())
+			addressState.leaderAddr = raddr.String()
+			initializeLeaderConnection()
+			gameState.LeaderID = getLeaderID(buf)
 			electionState = NORMAL
 			break
 		case "checkleader":
@@ -858,6 +911,7 @@ func goClient(wg sync.WaitGroup) {
 				}
 			}
 			byt := encodeMessage(message)
+			logLeader("Sent message " + string(byt))
 			_, err := addressState.goConnection.WriteToUDP(byt, raddr)
 			checkError(err)
 			break
@@ -910,7 +964,11 @@ func javaGoConnection(wg sync.WaitGroup) {
  */
 
 func startElection(bufChan chan []byte) {
+
 	leaderID := gameState.LeaderID
+	fmt.Println("$$$$$$$$$$$$$$$$$$")
+	fmt.Println(leaderID)
+	fmt.Println("$$$$$$$$$$$$$$$$$$")
 	message := LeaderElectionMessage{
 		MessageType: "checkleader",
 		Round:       gameState.Round,
@@ -918,10 +976,11 @@ func startElection(bufChan chan []byte) {
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(addressState.goConnection, byt)
-	received := 1
-	positive := 1
+	received := 0
+	positive := 0
 	for {
 		buf, timedout := <-bufChan
+		fmt.Println("#############################")
 		if !timedout {
 			break
 		}
@@ -929,25 +988,32 @@ func startElection(bufChan chan []byte) {
 		fmt.Println(timedout)
 		fmt.Println(buf)
 		fmt.Println(len(buf))
+
 		if getLeaderID(buf) > leaderID {
 			return
 		}
+		
 		received++
 		if getMessageType(buf) == "leaderdead" {
 			positive++
 		}
-		if received == len(gameState.AddrToPid)-2 {
+		/*if received == len(gameState.AddrToPid)-2 {
 			break
-		}
+		}*/
 	}
+	fmt.Println("$$$$$$$$$$$$$$$$$$")
+	fmt.Println(leaderID, positive, received)
+	fmt.Println("$$$$$$$$$$$$$$$$$$")
+	
 	if positive > received/2 {
-		electNewLeader()
-
+		if gameState.LeaderID == leaderID {
+			electNewLeader()
+		}
 	}
 }
 
 func electNewLeader() {
-	newLeaderConn := initializeLeader(":0")
+	initializeLeader(":0")
 	leaderState.Positions = gameState.Positions
 	gameState.LeaderID++
 	message := LeaderElectionMessage{
@@ -956,12 +1022,12 @@ func electNewLeader() {
 		LeaderID:    gameState.LeaderID,
 	}
 	byt := encodeMessage(message)
-	broadcastMessage(newLeaderConn, byt)
+	broadcastMessage(leaderState.leaderConnection, byt)
 	time.Sleep(1000 * time.Millisecond)
-	go leaderListener(newLeaderConn)
+	go leaderListener()
 	//TODO sleep might be needed
 	//TODO not sure if working
-	splitAddress := strings.Split(newLeaderConn.LocalAddr().String(), ":")
+	splitAddress := strings.Split(leaderState.leaderConnection.LocalAddr().String(), ":")
 	addressState.leaderAddr = "localhost:" + splitAddress[len(splitAddress)-1]
 	initializeLeaderConnection()
 	//electionState = NORMAL
