@@ -25,8 +25,8 @@ var MIN_GAME_SPEED = (1000 / 2) * time.Millisecond       // time between every n
 var FOLLOWER_RESPONSE_TIME = 500 * 2 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
-var LATENCY_FILENAME = "latency.csv"
-var OVERHEAD_FILENAME = "overhead.csv"
+var ROUND_LATENCY_FILENAME = "../../metrics/roundLatency.csv"
+var READ_THROUGHPUT_FILENAME = "../../metrics/readThroughput.csv"
 
 // STRUCTURES
 type MyMove struct {
@@ -155,7 +155,7 @@ func readFromUDPWithTimeout(conn *net.UDPConn, timeoutTime time.Time) ([]byte, *
 	buf := make([]byte, 4096)
 	conn.SetReadDeadline(timeoutTime)
 	n, raddr, err := conn.ReadFromUDP(buf)
-	recordOverhead(n)
+	recordReadThroughput(n)
 
 	if err != nil {
 		if e, ok := err.(net.Error); !ok || !e.Timeout() {
@@ -174,7 +174,7 @@ func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
 	buf := make([]byte, 4096)
 	n, raddr, err := conn.ReadFromUDP(buf)
 	checkError(err)
-	recordOverhead(n)
+	recordReadThroughput(n)
 
 	return buf[0:n], raddr
 }
@@ -228,10 +228,10 @@ func logClient(message string) {
 // TODO: measure at different failure rates, write to csv file
 
 // what is the smoothness/time delta between consecutive rounds?
-func recordLatency() {
+func recordRoundLatency() {
 	diff := time.Since(lastTime)
 
-	csvfile, err := os.OpenFile(LATENCY_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
+	csvfile, err := os.OpenFile(ROUND_LATENCY_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
 	checkError(err)
 	defer csvfile.Close()
 	writer := csv.NewWriter(csvfile)
@@ -245,14 +245,14 @@ func recordLatency() {
 }
 
 // length of messages received by this player by round
-func recordOverhead(overhead int) {
-	csvfile, err := os.OpenFile(OVERHEAD_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
+func recordReadThroughput(n int) {
+	csvfile, err := os.OpenFile(READ_THROUGHPUT_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
 	checkError(err)
 	defer csvfile.Close()
 	writer := csv.NewWriter(csvfile)
 
 	err = writer.Write([]string{strconv.Itoa(gameState.Round),
-		strconv.Itoa(gameState.MyPid), strconv.Itoa(overhead)})
+		strconv.Itoa(gameState.MyPid), strconv.Itoa(n)})
 	checkError(err)
 	writer.Flush()
 }
@@ -357,7 +357,7 @@ func endGameMessage() GameOverMessage {
 }
 
 func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
-	recordLatency()
+	recordRoundLatency()
 	newRoundMessage := newRoundMessage()
 	broadcastMessage(conn, newRoundMessage)
 	logLeader("done sending round start messages.")
@@ -541,11 +541,11 @@ func initializeGameState() {
 }
 
 func initializePerformanceMetrics() {
-	latencyFile, err := os.Create(LATENCY_FILENAME)
+	latencyFile, err := os.Create(ROUND_LATENCY_FILENAME)
 	checkError(err)
 	defer latencyFile.Close()
 
-	overheadFile, err := os.Create(OVERHEAD_FILENAME)
+	overheadFile, err := os.Create(READ_THROUGHPUT_FILENAME)
 	checkError(err)
 	defer overheadFile.Close()
 
