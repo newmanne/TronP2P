@@ -704,29 +704,28 @@ func surviveFollowerResponseInjectedFailure(pid string) bool {
 	return true
 }
 
+func updateGracePeriod() {
+	// count missed messages for those who did not respond, or reset
+	for pid, alive := range gameState.Alive {
+		_, responded := getLeaderMoveMap()[pid]
+		if responded {
+			resetGracePeriod(pid)
+		} else {
+			countGracePeriod(pid)
+			if alive {
+				addContinuedMove(pid)
+			}
+		}
+	}
+}
+
 func timeToRespond() bool {
 	recvCount := len(getLeaderMoveMap())
 	totalNeeded := len(gameState.AddrToPid) - len(gameState.DroppedForever)
 	logLeader("received " + strconv.Itoa(recvCount) + "/" + strconv.Itoa(totalNeeded) + " messages")
-	if recvCount == totalNeeded {
-		// count missed messages for those who did not respond, or reset
-		for pid, alive := range gameState.Alive {
-			_, responded := getLeaderMoveMap()[pid]
-			if responded {
-				resetGracePeriod(pid)
-			} else {
-				countGracePeriod(pid)
-				if alive {
-					addContinuedMove(pid)
-				}
-			}
-		}
-		return true
-	}
-	return false
+	return recvCount == totalNeeded 
 }
 
-//TODO No comment.
 func isCollision(x, y int) bool {
 	if !COLLISION_IS_DEATH {
 		return false
@@ -805,6 +804,7 @@ func leaderListener() {
 					strconv.Itoa(gameState.Round) + ". Ignoring message")
 			}
 		}
+		updateGracePeriod()
 		if gameOver() {
 			break
 		}
