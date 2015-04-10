@@ -792,6 +792,7 @@ func leaderListener() {
 			if round == gameState.Round && !gameState.DroppedForever[pid] {
 				if surviveFollowerResponseInjectedFailure(pid) {
 					logLeader("Received move message " + " from player " + pid)
+					fmt.Println(leaderState.Positions)
 					move := makeMove(direction, pid)
 					fmt.Println("Registered move ", move)
 					if timeToRespond() {
@@ -854,8 +855,8 @@ func goClient(wg sync.WaitGroup) {
 			killPlayer(getPID(buf))
 		case "roundstart":
 			logClient("Round start message: " + string(buf))
-			addressState.recvChan <- buf
 			gameState.Round = getRoundNumber(buf)
+			addressState.recvChan <- buf
 			message := <-addressState.sendChan
 			_, err := addressState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
 			checkError(err)
@@ -1014,7 +1015,13 @@ func startElection(bufChan chan []byte) {
 
 func electNewLeader() {
 	initializeLeader(":0")
-	leaderState.Positions = gameState.Positions
+	//leaderState.Positions = gameState.Positions
+	for index, positions := range gameState.Positions {
+		position := leaderState.Positions[index]
+		for key, value := range positions {
+			position[key] = value
+		}
+	}
 	gameState.LeaderID++
 	message := LeaderElectionMessage{
 		MessageType: "newleader",
@@ -1023,7 +1030,7 @@ func electNewLeader() {
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(leaderState.leaderConnection, byt)
-	time.Sleep(1000 * time.Millisecond)
+//	time.Sleep(1000 * time.Millisecond)
 	go leaderListener()
 	//TODO sleep might be needed
 	//TODO not sure if working
