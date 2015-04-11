@@ -66,3 +66,4 @@ build/
 ## Emacs
 *~
 #*#
+*.csv
