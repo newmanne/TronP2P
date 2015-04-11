@@ -10,6 +10,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Maps;
 import lombok.Getter;
 import org.cpsc538B.*;
 import org.cpsc538B.go.GoSender;
@@ -55,6 +56,8 @@ public class GameScreen extends ScreenAdapter {
     private final StretchViewport viewport;
     private TronInput tronInput;
 
+    private Map<String, Label> pidToLabel = new HashMap<>();
+
     // game state
     private final Map<String, PositionAndDirection> playerPositions;
     private final int[][] grid;
@@ -91,6 +94,7 @@ public class GameScreen extends ScreenAdapter {
             final Label nickname = new Label(entry.getValue(), game.getAssets().getLabelStyle());
             nickname.setColor(pidToColor.get(entry.getKey()));
             hudTable.add(nickname);
+            pidToLabel.put(entry.getKey(), nickname);
             hudTable.row();
         });
     }
@@ -110,7 +114,8 @@ public class GameScreen extends ScreenAdapter {
                 round = ((GoSender.RoundStartEvent) event).getRound();
                 game.getGoSender().sendToGo(new GoSender.MoveEvent(tronInput.getProvisionalDirection(), pid, round));
             } else if (event instanceof GoSender.MovesEvent) {
-                // process moves
+                // process move
+                final ImmutableMap<String, PositionAndDirection> oldPositions = ImmutableMap.copyOf(playerPositions);
                 final GoSender.MovesEvent movesEvent = (GoSender.MovesEvent) event;
                 final List<Map<String, PositionAndDirection>> moves = movesEvent.getMoves();
                 moves.forEach(roundMoves -> {
@@ -120,6 +125,15 @@ public class GameScreen extends ScreenAdapter {
                         playerPositions.put(entry.getKey(), move);
                     });
                 });
+
+                // Find dead players and mark them as such. A dead player is a player that has not moved
+                Maps.difference(oldPositions, playerPositions).entriesInCommon().keySet().forEach(deadPid -> {
+                    final Label label = pidToLabel.get(deadPid);
+                    if (!label.getText().toString().endsWith("(DEAD)")) {
+                        label.setText(label.getText() + " (DEAD)");
+                    }
+                });
+
             } else if (event instanceof GoSender.GameOverEvent) {
                 final List<String> pidsInOrderOfDeath = ((GoSender.GameOverEvent) event).getPidsInOrderOfDeath();
                 game.setScreen(new GameOverScreen(game, pidsInOrderOfDeath));
