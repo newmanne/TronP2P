@@ -2,7 +2,6 @@ package main
 
 import (
 	//	"reflect"
-	"runtime/debug"
 	"bufio"
 	"encoding/csv"
 	"encoding/json"
@@ -10,6 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,12 +24,15 @@ var lastTime time.Time
 
 var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var MIN_GAME_SPEED = 1000/4 * time.Millisecond       // time between every new java move
+var MIN_GAME_SPEED = 1000 / 20 * time.Millisecond        // time between every new java move
 var FOLLOWER_RESPONSE_TIME = 500 * 4 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
+var METRICS = false                                      // disable metrics
 var ROUND_LATENCY_FILENAME = "../../metrics/roundLatency.csv"
 var READ_THROUGHPUT_FILENAME = "../../metrics/readThroughput.csv"
+
+var DIRECTIONS = [...]string{"DOWN", "LEFT", "UP", "RIGHT"}
 
 // STRUCTURES
 type MyMove struct {
@@ -64,7 +67,7 @@ type GameState struct {
 }
 
 type LeaderState struct {
-	Positions []map[string]Move
+	Positions        []map[string]Move
 	leaderConnection *net.UDPConn
 }
 
@@ -191,6 +194,20 @@ func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
 /*
 * MATH UTILITIES
  */
+func randomDir() string {
+	var direction string
+	directionId := randomInt(0, 4)
+	if directionId == 0 {
+		direction = "UP"
+	} else if directionId == 1 {
+		direction = "DOWN"
+	} else if directionId == 2 {
+		direction = "LEFT"
+	} else {
+		direction = "RIGHT"
+	}
+	return direction
+}
 
 func randomInt(min, max int) int {
 	return rand.Intn(max-min) + min
@@ -238,6 +255,9 @@ func logClient(message string) {
 
 // what is the smoothness/time delta between consecutive rounds?
 func recordRoundLatency() {
+	if !METRICS {
+		return
+	}
 	diff := time.Since(lastTime)
 
 	csvfile, err := os.OpenFile(ROUND_LATENCY_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
@@ -255,6 +275,9 @@ func recordRoundLatency() {
 
 // length of messages received by this player by round
 func recordReadThroughput(n int) {
+	if !METRICS {
+		return
+	}
 	csvfile, err := os.OpenFile(READ_THROUGHPUT_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
 	checkError(err)
 	defer csvfile.Close()
@@ -405,17 +428,7 @@ func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
 * INIT FUNCTIONS
  */
 func CreateInitPlayerPosition() Move {
-	var direction string
-	directionId := randomInt(0, 4)
-	if directionId == 0 {
-		direction = "UP"
-	} else if directionId == 1 {
-		direction = "DOWN"
-	} else if directionId == 2 {
-		direction = "LEFT"
-	} else {
-		direction = "RIGHT"
-	}
+	direction := randomDir()
 	// Give a small buffer so they don't crash into a wall immediately!
 	if (gameState.GridWidth < 30) || (gameState.GridHeight < 30) {
 		panic("game grid dimensions are too small!")
@@ -466,7 +479,7 @@ func initLobby() {
 	}
 }
 
-func initializeLeader(leaderAddrString string) () {
+func initializeLeader(leaderAddrString string) {
 	leaderState.Positions = make([]map[string]Move, MAX_ALLOWABLE_MISSED_MESSAGES)
 	for i := 0; i < len(leaderState.Positions); i++ {
 		leaderState.Positions[i] = make(map[string]Move)
@@ -559,6 +572,16 @@ func initializeGameState() {
 	for i := 0; i < gameState.GridWidth; i++ {
 		gameState.Grid[i] = make([]int, gameState.GridHeight)
 	}
+	// walls
+	for i := 0; i < gameState.GridHeight; i++ {
+		gameState.Grid[i][0] = -1
+		gameState.Grid[i][gameState.GridHeight-1] = -1
+
+	}
+	for j := 0; j < gameState.GridWidth; j++ {
+		gameState.Grid[0][j] = -1
+		gameState.Grid[gameState.GridWidth-1][j] = -1
+	}
 	gameState.Alive = make(map[string]bool)
 	gameState.Grace = make(map[string]int)
 	gameState.AddrToPid = make(map[string]string)
@@ -577,6 +600,9 @@ func initializeGameState() {
 }
 
 func initializePerformanceMetrics() {
+	if !METRICS {
+		return
+	}
 	latencyFile, err := os.Create(ROUND_LATENCY_FILENAME)
 	checkError(err)
 	defer latencyFile.Close()
@@ -591,6 +617,13 @@ func initializePerformanceMetrics() {
 /*
 * CHECK FUNCTIONS
  */
+func isOpposite(directionA, directionB string) bool {
+	return directionA == "DOWN" && directionB == "UP" || directionA == "UP" && directionB == "DOWN" || directionA == "LEFT" && directionB == "RIGHT" || directionA == "RIGHT" && directionB == "LEFT"
+}
+
+func isAi() bool {
+	return addressState.javaAddr == "localhost:"
+}
 
 func gameOver() bool {
 	if DISABLE_GAME_OVER {
@@ -697,6 +730,27 @@ func addContinuedMove(pid string) {
 	makeMove(prevMove.Direction, pid)
 }
 
+func createContinuedMove(direction string, prevMove Move) Move {
+	nextMove := Move{
+		Direction: direction,
+		X:         prevMove.X,
+		Y:         prevMove.Y,
+	}
+	switch nextMove.Direction {
+	case "DOWN":
+		nextMove.Y = max(1, nextMove.Y-1)
+	case "UP":
+		nextMove.Y = min(gameState.GridHeight-2, nextMove.Y+1)
+	case "LEFT":
+		nextMove.X = max(1, nextMove.X-1)
+	case "RIGHT":
+		nextMove.X = min(gameState.GridWidth-2, nextMove.X+1)
+	default:
+		panic("Next move direction unknown")
+	}
+	return nextMove
+}
+
 // Attempt to move the player pid one space in given direction. If movement
 // results in collision, the player dies.
 func makeMove(direction string, pid string) Move {
@@ -704,38 +758,15 @@ func makeMove(direction string, pid string) Move {
 	fmt.Println("Make move", direction, pid, prevMove)
 	var nextMove Move
 	if gameState.Alive[pid] {
-		nextMove = Move{
-			Direction: direction,
-			X:         prevMove.X,
-			Y:         prevMove.Y,
-		}
-		fmt.Println(nextMove)
-		switch nextMove.Direction {
-		case "DOWN":
-			fmt.Println("DOWN")
-			nextMove.Y = max(1, nextMove.Y-1)
-		case "UP":
-			fmt.Println("UP")
-			nextMove.Y = min(gameState.GridHeight-2, nextMove.Y+1)
-		case "LEFT":
-			fmt.Println("LEFT")
-			nextMove.X = max(1, nextMove.X-1)
-		case "RIGHT":
-			fmt.Println("RIGHT")
-			nextMove.X = min(gameState.GridWidth-2, nextMove.X+1)
-		default:
-			panic("Next move direction unknown")
-		}
-
-		fmt.Println(nextMove)
+		nextMove = createContinuedMove(direction, prevMove)
 		if isCollision(nextMove.X, nextMove.Y) {
-			
+
 			//killPlayer(pid)
 			message := KillPlayerMessage{
 				MessageType: "killplayer",
-				EventName: "killplayer",
-				PlayerPID: pid,
-				Round: gameState.Round,
+				EventName:   "killplayer",
+				PlayerPID:   pid,
+				Round:       gameState.Round,
 			}
 			broadcastMessage(leaderState.leaderConnection, encodeMessage(message))
 			nextMove = prevMove
@@ -780,7 +811,7 @@ func timeToRespond() bool {
 	recvCount := len(getLeaderMoveMap())
 	totalNeeded := len(gameState.AddrToPid) - len(gameState.DroppedForever)
 	logLeader("received " + strconv.Itoa(recvCount) + "/" + strconv.Itoa(totalNeeded) + " messages")
-	return recvCount == totalNeeded 
+	return recvCount == totalNeeded
 }
 
 func isCollision(x, y int) bool {
@@ -825,7 +856,12 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go goClient(wg)
-	go javaGoConnection(wg)
+	if isAi() {
+		log("I'm an AI player")
+		go aiGoConnection(wg)
+	} else {
+		go javaGoConnection(wg)
+	}
 	wg.Wait()
 	fmt.Println("GOODBYE")
 }
@@ -1020,6 +1056,44 @@ func javaGoConnection(wg sync.WaitGroup) {
 	fmt.Println("Java connection closed")
 }
 
+func aiGoConnection(wg sync.WaitGroup) {
+	defer wg.Done()
+	_ = <-addressState.recvChan // drain the first message with the starting positions. We aren't sophisticated enough right now
+	for {
+		message := <-addressState.recvChan
+		messageType := getMessageType(message)
+		switch messageType {
+		case "roundstart":
+			if isGameOverMessage(message) {
+				log("A Game Over was sent to ai player. My work here is done. Goodbye")
+				break
+			}
+			time.Sleep(MIN_GAME_SPEED)
+
+			// all AI goes here
+			direction := randomDir()
+			prevMove := getCurrentMoveMap()[strconv.Itoa(gameState.MyPid)]
+			for _, dir := range DIRECTIONS {
+				move := createContinuedMove(dir, prevMove)
+				if !isCollision(move.X, move.Y) {
+					direction = dir
+					break
+				}
+			}
+
+			move := map[string]interface{}{"eventName": "myMove", "direction": direction, "pid": strconv.Itoa(gameState.MyPid), "round": gameState.Round}
+			addressState.sendChan <- []byte(encodeMessage(move))
+			break
+		case "moves":
+			// do nothing, since we aren't adapting our strategy to the state of things
+			break
+		default:
+			panic("Message to AI not recognized: " + messageType)
+		}
+	}
+	fmt.Println("AI OVER")
+}
+
 /*
 * Leader election
  */
@@ -1054,7 +1128,7 @@ func startElection(bufChan chan []byte) {
 		if getLeaderID(buf) > leaderID {
 			return
 		}
-		
+
 		received++
 		if getMessageType(buf) == "leaderdead" {
 			positive++
@@ -1066,7 +1140,7 @@ func startElection(bufChan chan []byte) {
 	fmt.Println("$$$$$$$$$$$$$$$$$$")
 	fmt.Println(leaderID, positive, received)
 	fmt.Println("$$$$$$$$$$$$$$$$$$")
-	
+
 	if positive > received/2 {
 		if gameState.LeaderID == leaderID {
 			electNewLeader()
@@ -1091,7 +1165,7 @@ func electNewLeader() {
 	}
 	byt := encodeMessage(message)
 	broadcastMessage(leaderState.leaderConnection, byt)
-//	time.Sleep(1000 * time.Millisecond)
+	//	time.Sleep(1000 * time.Millisecond)
 	go leaderListener()
 	//TODO sleep might be needed
 	//TODO not sure if working

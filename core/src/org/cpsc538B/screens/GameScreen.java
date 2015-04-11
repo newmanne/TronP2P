@@ -32,8 +32,8 @@ public class GameScreen extends ScreenAdapter {
     public static final int UNOCCUPIED = 0;
 
     // grid dimensions
-    public final static int GRID_WIDTH = 400;
-    public final static int GRID_HEIGHT = 400;
+    public final static int GRID_WIDTH = 200;
+    public final static int GRID_HEIGHT = 200;
 
     // display size of grid (how big each square is)
     public final static int GRID_SIZE = 10;
