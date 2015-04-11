@@ -1,11 +1,11 @@
 package main
 
 import (
-	//	"reflect"
 	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"math/rand"
 	"net"
 	"os"
@@ -22,9 +22,9 @@ var leaderState LeaderState
 var electionState = NORMAL
 var lastTime time.Time
 
-var DISABLE_GAME_OVER = true // to allow single player game for debugging
+var DISABLE_GAME_OVER = false // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
-var MIN_GAME_SPEED = 1000 / 20 * time.Millisecond        // time between every new java move
+var MIN_GAME_SPEED = 1000 / 40 * time.Millisecond        // time between every new java move
 var FOLLOWER_RESPONSE_TIME = 500 * 4 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
@@ -51,7 +51,6 @@ type GameState struct {
 	LeaderID       int
 	Round          int
 	MyPid          int
-	MyPriority     int
 	GridWidth      int
 	GridHeight     int
 	Grid           [][]int
@@ -141,6 +140,7 @@ type GameOver struct {
 type GameOverMessage struct {
 	MessageType string `json:"messageType"`
 	EventName   string `json:"eventName"`
+	Round       int    `json:"round"`
 	GameOver    `json:"gameOver"`
 }
 
@@ -195,18 +195,7 @@ func readFromUDP(conn *net.UDPConn) ([]byte, *net.UDPAddr) {
 * MATH UTILITIES
  */
 func randomDir() string {
-	var direction string
-	directionId := randomInt(0, 4)
-	if directionId == 0 {
-		direction = "UP"
-	} else if directionId == 1 {
-		direction = "DOWN"
-	} else if directionId == 2 {
-		direction = "LEFT"
-	} else {
-		direction = "RIGHT"
-	}
-	return direction
+	return DIRECTIONS[randomInt(0, 4)]
 }
 
 func randomInt(min, max int) int {
@@ -398,8 +387,9 @@ func startGameMessage(pid string, startingPositions map[string]Move) GameStartMe
 
 func endGameMessage() GameOverMessage {
 	return GameOverMessage{
-		MessageType: "gameover",
+		MessageType: "gameOver",
 		EventName:   "gameOver",
+		Round:       gameState.Round,
 		GameOver: GameOver{
 			PidsInOrderOfDeath: gameState.Finish,
 		},
@@ -556,7 +546,6 @@ func initializeJavaConnection() {
 
 func initializeGameState() {
 	var err error
-	rand.Seed(time.Now().Unix())
 	gameState.LeaderID = 0
 	gameState.Round = 1
 	gameState.GridWidth, err = strconv.Atoi(os.Args[4])
@@ -564,6 +553,9 @@ func initializeGameState() {
 	gameState.GridHeight, err = strconv.Atoi(os.Args[5])
 	checkError(err)
 	gameState.Nickname = os.Args[6]
+	hash := fnv.New64a()
+	hash.Write([]byte(gameState.Nickname))
+	rand.Seed(time.Now().Unix() + int64(hash.Sum64()))
 	gameState.Positions = make([]map[string]Move, MAX_ALLOWABLE_MISSED_MESSAGES)
 	for i := 0; i < len(gameState.Positions); i++ {
 		gameState.Positions[i] = make(map[string]Move)
@@ -617,10 +609,6 @@ func initializePerformanceMetrics() {
 /*
 * CHECK FUNCTIONS
  */
-func isOpposite(directionA, directionB string) bool {
-	return directionA == "DOWN" && directionB == "UP" || directionA == "UP" && directionB == "DOWN" || directionA == "LEFT" && directionB == "RIGHT" || directionA == "RIGHT" && directionB == "LEFT"
-}
-
 func isAi() bool {
 	return addressState.javaAddr == "localhost:"
 }
@@ -629,8 +617,7 @@ func gameOver() bool {
 	if DISABLE_GAME_OVER {
 		return false
 	}
-	//TODO the following two  don't make sense.
-	numDeadToEnd := len(gameState.AddrToPid) - 1
+	numDeadToEnd := len(gameState.Alive) - 1
 	logLeader("There are " + strconv.Itoa(len(gameState.Finish)) + " dead players and we require at least " +
 		strconv.Itoa(numDeadToEnd) + " dead players to call it a game")
 	return len(gameState.Finish) >= numDeadToEnd
@@ -660,11 +647,6 @@ func isJoinMessage(buf []byte) bool {
 func isStartMessage(buf []byte) bool {
 	//return getMessageType(message) == "start"
 	return strings.TrimSpace(string(buf)) == "START"
-}
-
-func isGameOverMessage(buf []byte) bool {
-	return getMessageType(buf) == "gameover"
-	return strings.Contains(string(buf), "GameOver")
 }
 
 /*
@@ -712,15 +694,12 @@ func getLeaderMoveMap() map[string]Move {
 }
 
 func slideWindow() {
-	fmt.Println("Sliding window")
 	// push everything back
 	for i := 0; i < len(leaderState.Positions)-1; i++ {
 		leaderState.Positions[i] = leaderState.Positions[i+1]
 	}
 	// clear final move
 	leaderState.Positions[len(leaderState.Positions)-1] = make(map[string]Move)
-	fmt.Println(leaderState.Positions)
-	fmt.Println("slide done")
 }
 
 //TODO Change this name
@@ -738,13 +717,13 @@ func createContinuedMove(direction string, prevMove Move) Move {
 	}
 	switch nextMove.Direction {
 	case "DOWN":
-		nextMove.Y = max(1, nextMove.Y-1)
+		nextMove.Y = max(0, nextMove.Y-1)
 	case "UP":
-		nextMove.Y = min(gameState.GridHeight-2, nextMove.Y+1)
+		nextMove.Y = min(gameState.GridHeight-1, nextMove.Y+1)
 	case "LEFT":
-		nextMove.X = max(1, nextMove.X-1)
+		nextMove.X = max(0, nextMove.X-1)
 	case "RIGHT":
-		nextMove.X = min(gameState.GridWidth-2, nextMove.X+1)
+		nextMove.X = min(gameState.GridWidth-1, nextMove.X+1)
 	default:
 		panic("Next move direction unknown")
 	}
@@ -761,7 +740,6 @@ func makeMove(direction string, pid string) Move {
 		nextMove = createContinuedMove(direction, prevMove)
 		if isCollision(nextMove.X, nextMove.Y) {
 
-			//killPlayer(pid)
 			message := KillPlayerMessage{
 				MessageType: "killplayer",
 				EventName:   "killplayer",
@@ -857,7 +835,7 @@ func main() {
 	wg.Add(2)
 	go goClient(wg)
 	if isAi() {
-		log("I'm an AI player")
+		log("I'm an AI player named " + gameState.Nickname)
 		go aiGoConnection(wg)
 	} else {
 		go javaGoConnection(wg)
@@ -902,6 +880,8 @@ func leaderListener() {
 		}
 		updateGracePeriod()
 		if gameOver() {
+			logLeader("Broadcasting end of game!")
+			broadcastMessage(leaderState.leaderConnection, encodeMessage(endGameMessage()))
 			break
 		}
 		byt := encodeMessage(roundMoves)
@@ -959,31 +939,36 @@ func goClient(wg sync.WaitGroup) {
 			break
 		case "moves":
 			logClient("Moves message: " + string(buf))
-			fmt.Println(gameState.Positions)
 			for index, moves := range getMoves(buf) {
 				positions := gameState.Positions[index]
 				for pid, move := range moves.(map[string]interface{}) {
 					castedMove := move.(map[string]interface{})
-					positions[pid] = Move{
+					move := Move{
 						Direction: castedMove["direction"].(string),
 						X:         int(castedMove["x"].(float64)),
 						Y:         int(castedMove["y"].(float64)),
 					}
+					positions[pid] = move
+					// If you are the leader, you should probably not do this board update (shared state between the leader and client always gets us in to trouble...)
+					if !addressState.isLeader {
+						gameState.Grid[move.X][move.Y], _ = strconv.Atoi(pid)
+					}
 				}
 			}
-			fmt.Println(gameState.Positions)
 			addressState.recvChan <- buf
 			break
-		case "gameover":
-			//TODO test if its working
+		case "gameOver":
 			gameOver = true
+			addressState.recvChan <- buf
 			logClient("Cloosing Client")
 			break
 		case "newleader":
 			fmt.Println("Notified about new leader", raddr.String())
 			addressState.leaderAddr = raddr.String()
 			initializeLeaderConnection()
-			gameState.LeaderID = getLeaderID(buf)
+			newLeaderId := getLeaderID(buf)
+			addressState.isLeader = newLeaderId == gameState.LeaderID
+			gameState.LeaderID = newLeaderId
 			electionState = NORMAL
 			break
 		case "checkleader":
@@ -1035,10 +1020,6 @@ func javaGoConnection(wg sync.WaitGroup) {
 		switch messageType {
 		case "roundstart":
 			addressState.javaConnection.Write(append(message, '\n'))
-			if isGameOverMessage(message) {
-				logJava("A Game Over was sent to java. My work here is done. Goodbye")
-				break
-			}
 			// read some reply from the java game (update of move, or death)
 			time.Sleep(MIN_GAME_SPEED)
 			status, err := addressState.connBuf.ReadString('\n')
@@ -1048,6 +1029,11 @@ func javaGoConnection(wg sync.WaitGroup) {
 			break
 		case "moves":
 			addressState.javaConnection.Write(append(message, '\n'))
+			break
+		case "gameOver":
+			addressState.javaConnection.Write(append(message, '\n'))
+			logJava("A Game Over was sent to java. My work here is done. Goodbye")
+			return
 			break
 		default:
 			panic("Message to send to java not recognized: " + messageType)
@@ -1059,21 +1045,24 @@ func javaGoConnection(wg sync.WaitGroup) {
 func aiGoConnection(wg sync.WaitGroup) {
 	defer wg.Done()
 	_ = <-addressState.recvChan // drain the first message with the starting positions. We aren't sophisticated enough right now
+	directionShuffleOrder := rand.Perm(len(DIRECTIONS))
 	for {
 		message := <-addressState.recvChan
 		messageType := getMessageType(message)
 		switch messageType {
 		case "roundstart":
-			if isGameOverMessage(message) {
-				log("A Game Over was sent to ai player. My work here is done. Goodbye")
-				break
-			}
 			time.Sleep(MIN_GAME_SPEED)
 
 			// all AI goes here
+			// Pick a random permutation of the directions ever X moves. Try each direction in order, and pick the first that doesn't give you a collision.
 			direction := randomDir()
 			prevMove := getCurrentMoveMap()[strconv.Itoa(gameState.MyPid)]
-			for _, dir := range DIRECTIONS {
+			if gameState.Round%30 == 0 {
+				// reshuffle every x moves
+				directionShuffleOrder = rand.Perm(len(DIRECTIONS))
+			}
+			for i := 0; i < len(DIRECTIONS); i++ {
+				dir := DIRECTIONS[directionShuffleOrder[i]]
 				move := createContinuedMove(dir, prevMove)
 				if !isCollision(move.X, move.Y) {
 					direction = dir
@@ -1081,11 +1070,16 @@ func aiGoConnection(wg sync.WaitGroup) {
 				}
 			}
 
+			log("AI DECIDED TO MOVE: " + direction)
 			move := map[string]interface{}{"eventName": "myMove", "direction": direction, "pid": strconv.Itoa(gameState.MyPid), "round": gameState.Round}
 			addressState.sendChan <- []byte(encodeMessage(move))
 			break
 		case "moves":
 			// do nothing, since we aren't adapting our strategy to the state of things
+			break
+		case "gameOver":
+			log("A Game Over was sent to ai player. My work here is done. Goodbye")
+			return
 			break
 		default:
 			panic("Message to AI not recognized: " + messageType)
@@ -1163,6 +1157,7 @@ func electNewLeader() {
 		Round:       gameState.Round,
 		LeaderID:    gameState.LeaderID,
 	}
+	addressState.isLeader = true
 	byt := encodeMessage(message)
 	broadcastMessage(leaderState.leaderConnection, byt)
 	//	time.Sleep(1000 * time.Millisecond)
