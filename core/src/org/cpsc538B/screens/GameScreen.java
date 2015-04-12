@@ -12,6 +12,7 @@ import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import lombok.Getter;
+import org.apache.commons.lang3.RandomUtils;
 import org.cpsc538B.*;
 import org.cpsc538B.go.GoSender;
 import org.cpsc538B.input.TronInput;
@@ -39,18 +40,6 @@ public class GameScreen extends ScreenAdapter {
     // display size of grid (how big each square is)
     public final static int GRID_SIZE = 10;
 
-    // player colors
-    public final static ImmutableMap<String, Color> pidToColor = ImmutableMap.<String, Color>builder()
-            .put("1", Color.RED)
-            .put("2", Color.BLUE)
-            .put("3", Color.GREEN)
-            .put("4", Color.PURPLE)
-            .put("5", Color.GRAY)
-            .put("6", Color.ORANGE)
-            .put("7", Color.OLIVE)
-            .put("8", Color.MAGENTA)
-            .build();
-
     // libgdx stuff
     private final TronP2PGame game;
     private final StretchViewport viewport;
@@ -76,6 +65,8 @@ public class GameScreen extends ScreenAdapter {
             new Vector2(0, 0)
     };
 
+    public static Map<String, Color> pidToColor;
+
     public GameScreen(TronP2PGame game, String pid, Map<String, PositionAndDirection> startingPositions) {
         this.game = game;
         this.pid = pid;
@@ -90,6 +81,12 @@ public class GameScreen extends ScreenAdapter {
         hud.addActor(rootTable);
         final Table hudTable = new Table();
         rootTable.add(hudTable).expand().left().top().padTop(GRID_SIZE * 3).padLeft(GRID_SIZE * 3);
+
+        pidToColor = new HashMap<String, Color>();
+        startingPositions.keySet().forEach(playerPid -> {
+            pidToColor.put(playerPid, new Color(RandomUtils.nextFloat(0, 1.0f), RandomUtils.nextFloat(0, 1.0f), RandomUtils.nextFloat(0, 1.0f), 1.0f));
+        });
+
         game.getNicknames().entrySet().forEach(entry -> {
             final Label nickname = new Label(entry.getValue(), game.getAssets().getLabelStyle());
             nickname.setColor(pidToColor.get(entry.getKey()));
