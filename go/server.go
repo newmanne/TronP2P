@@ -28,9 +28,9 @@ var MIN_GAME_SPEED = 1000 / 40 * time.Millisecond        // time between every n
 var FOLLOWER_RESPONSE_TIME = 500 * 4 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
-var METRICS = false                                      // disable metrics
-var ROUND_LATENCY_FILENAME = "../../metrics/roundLatency.csv"
-var READ_THROUGHPUT_FILENAME = "../../metrics/readThroughput.csv"
+var METRICS = true                                       // disable metrics
+var ROUND_LATENCY_FILENAME = "C:/cygwin64/home/Sam/TronP2P/metrics/roundLatency.csv"
+var READ_THROUGHPUT_FILENAME = "C:/cygwin64/home/Sam/TronP2P/metrics/readThroughput.csv"
 
 var DIRECTIONS = [...]string{"DOWN", "LEFT", "UP", "RIGHT"}
 
@@ -255,7 +255,7 @@ func recordRoundLatency() {
 	writer := csv.NewWriter(csvfile)
 
 	err = writer.Write([]string{strconv.Itoa(gameState.Round),
-		strconv.Itoa(gameState.MyPid), strconv.FormatInt(diff.Nanoseconds(), 10)})
+		strconv.Itoa(gameState.LeaderID), strconv.FormatInt(diff.Nanoseconds(), 10)})
 	checkError(err)
 	writer.Flush()
 
@@ -397,7 +397,6 @@ func endGameMessage() GameOverMessage {
 }
 
 func newRound(conn *net.UDPConn) (roundMoves MovesMessage) {
-	recordRoundLatency()
 	newRoundMessage := newRoundMessage()
 	broadcastMessage(conn, newRoundMessage)
 	logLeader("Done sending round start messages.")
@@ -617,7 +616,9 @@ func gameOver() bool {
 	if DISABLE_GAME_OVER {
 		return false
 	}
+
 	numDeadToEnd := len(gameState.Alive) - 1
+	//numDeadToEnd := 1 // for metric debugging
 	logLeader("There are " + strconv.Itoa(len(gameState.Finish)) + " dead players and we require at least " +
 		strconv.Itoa(numDeadToEnd) + " dead players to call it a game")
 	return len(gameState.Finish) >= numDeadToEnd
@@ -931,6 +932,8 @@ func goClient(wg sync.WaitGroup) {
 			killPlayer(getPID(buf))
 		case "roundstart":
 			logClient("Round start message: " + string(buf))
+			recordRoundLatency()
+
 			gameState.Round = getRoundNumber(buf)
 			addressState.recvChan <- buf
 			message := <-addressState.sendChan
