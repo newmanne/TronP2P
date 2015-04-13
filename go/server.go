@@ -28,7 +28,7 @@ var MIN_GAME_SPEED = 1000 / 40 * time.Millisecond        // time between every n
 var FOLLOWER_RESPONSE_TIME = 500 * 4 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
-var METRICS = true                                       // disable metrics
+var METRICS = false                                       // disable metrics
 var ROUND_LATENCY_FILENAME = "C:/cygwin64/home/Sam/TronP2P/metrics/roundLatency.csv"
 var READ_THROUGHPUT_FILENAME = "C:/cygwin64/home/Sam/TronP2P/metrics/readThroughput.csv"
 
@@ -476,6 +476,7 @@ func initializeLeader(leaderAddrString string) {
 	leaderAddr, err := net.ResolveUDPAddr("udp", leaderAddrString)
 	checkError(err)
 	conn, err := net.ListenUDP("udp", leaderAddr)
+	fmt.Println(conn.LocalAddr(), conn.RemoteAddr())
 	checkError(err)
 	leaderState.leaderConnection = conn
 }
@@ -497,9 +498,10 @@ func initializeLeaderConnection() {
 func contactLeader() {
 	initializeConnection()
 	initializeLeaderConnection()
-	logClient("Sending a hello message to the leader")
+	fmt.Println("Sending a hello message to the leader", addressState.leaderAddr, addressState.goConnection.LocalAddr(),addressState.goConnection.RemoteAddr())
 	_, err := addressState.goConnection.WriteToUDP([]byte("JOIN:"+gameState.Nickname),
 		addressState.leaderUDPAddr)
+	fmt.Println("hellu")
 	checkError(err)
 	if addressState.isLeader {
 		message := <-addressState.sendChan
