@@ -973,7 +973,6 @@ func goClient(wg sync.WaitGroup) {
 			break
 		case "checkleader":
 			var message LeaderElectionMessage
-			//TODO add a condition on leaderid
 			if gameState.Round > getRoundNumber(buf) || gameState.LeaderID > getLeaderID(buf) {
 				message = LeaderElectionMessage{
 					MessageType: "leaderalive",
@@ -1095,9 +1094,7 @@ func aiGoConnection(wg sync.WaitGroup) {
 func startElection(bufChan chan []byte) {
 
 	leaderID := gameState.LeaderID
-	fmt.Println("$$$$$$$$$$$$$$$$$$")
-	fmt.Println(leaderID)
-	fmt.Println("$$$$$$$$$$$$$$$$$$")
+
 	message := LeaderElectionMessage{
 		MessageType: "checkleader",
 		Round:       gameState.Round,
@@ -1110,11 +1107,9 @@ func startElection(bufChan chan []byte) {
 	for {
 		buf, timedout := <-bufChan
 
-		fmt.Println("#############################")
 		if !timedout {
 			break
 		}
-		fmt.Println("#############################")
 		fmt.Println(timedout)
 		fmt.Println(buf)
 		fmt.Println(len(buf))
@@ -1127,13 +1122,7 @@ func startElection(bufChan chan []byte) {
 		if getMessageType(buf) == "leaderdead" {
 			positive++
 		}
-		/*if received == len(gameState.AddrToPid)-2 {
-			break
-		}*/
 	}
-	fmt.Println("$$$$$$$$$$$$$$$$$$")
-	fmt.Println(leaderID, positive, received)
-	fmt.Println("$$$$$$$$$$$$$$$$$$")
 
 	if positive > received/2 {
 		if gameState.LeaderID == leaderID {
@@ -1160,13 +1149,9 @@ func electNewLeader() {
 	addressState.isLeader = true
 	byt := encodeMessage(message)
 	broadcastMessage(leaderState.leaderConnection, byt)
-	//	time.Sleep(1000 * time.Millisecond)
 	go leaderListener()
-	//TODO sleep might be needed
-	//TODO not sure if working
 	splitAddress := strings.Split(leaderState.leaderConnection.LocalAddr().String(), ":")
 	addressState.leaderAddr = "localhost:" + splitAddress[len(splitAddress)-1]
 	initializeLeaderConnection()
-	//electionState = NORMAL
 	fmt.Println("New leader elected")
 }
