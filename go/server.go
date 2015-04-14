@@ -71,6 +71,7 @@ type LeaderState struct {
 }
 
 type AddressState struct {
+	LocalIP        string
 	javaAddr       string
 	leaderAddr     string
 	leaderUDPAddr  *net.UDPAddr
@@ -482,7 +483,7 @@ func initializeLeader(leaderAddrString string) {
 }
 
 func initializeConnection() {
-	addr, err := net.ResolveUDPAddr("udp", "localhost:0")
+	addr, err := net.ResolveUDPAddr("udp", addressState.LocalIP+":0")
 	checkError(err)
 	conn, err := net.ListenUDP("udp", addr)
 	checkError(err)
@@ -611,7 +612,7 @@ func initializePerformanceMetrics() {
 * CHECK FUNCTIONS
  */
 func isAi() bool {
-	return addressState.javaAddr == "localhost:"
+	return addressState.javaAddr == addressState.LocalIP + ":"
 }
 
 func gameOver() bool {
@@ -813,6 +814,18 @@ func isCollision(x, y int) bool {
 * MAIN FUNCTIONS
  */
 func main() {
+	host, _ := os.Hostname()
+	addrs, _ := net.LookupIP(host)
+	
+	for _, addr := range addrs {
+		if ipv4 := addr.To4(); ipv4 != nil {
+			addressState.LocalIP = ipv4.String()
+			break
+		}
+	}
+	if addressState.LocalIP == "" {
+		panic("No open ipv4 interface")
+	}
 	fmt.Println("Go process started")
 	if FOLLOWER_RESPONSE_TIME < MIN_GAME_SPEED {
 		panic("Can't set response time to be less than min game speed")
@@ -1156,7 +1169,7 @@ func electNewLeader() {
 	broadcastMessage(leaderState.leaderConnection, byt)
 	go leaderListener()
 	splitAddress := strings.Split(leaderState.leaderConnection.LocalAddr().String(), ":")
-	addressState.leaderAddr = "localhost:" + splitAddress[len(splitAddress)-1]
+	addressState.leaderAddr = addressState.LocalIP + ":" + splitAddress[len(splitAddress)-1]
 	initializeLeaderConnection()
 	fmt.Println("New leader elected")
 }
