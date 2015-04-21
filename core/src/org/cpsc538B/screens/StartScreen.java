@@ -19,6 +19,9 @@ import org.cpsc538B.model.PositionAndDirection;
 import org.cpsc538B.TronP2PGame;
 import org.cpsc538B.utils.GameUtils;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+
 import java.util.List;
 import java.util.Map;
 
@@ -28,7 +31,7 @@ import java.util.Map;
  */
 public class StartScreen extends ScreenAdapter {
 
-    public static final String DEFAULT_IP = "localhost:8081";
+    public static String DEFAULT_IP = "localhost:8081";
     public static final String START_A_GAME = "START A GAME";
     public static final String JOIN_A_GAME = "JOIN A GAME";
     public static final String CREATE_A_GAME = "CREATE A GAME";
@@ -44,6 +47,12 @@ public class StartScreen extends ScreenAdapter {
 
 
     public StartScreen(TronP2PGame game) {
+	try {
+	    String localHost = InetAddress.getLocalHost().getHostAddress();
+	    DEFAULT_IP = localHost + ":8081";
+	} catch (UnknownHostException e ) {
+	    System.out.println("Address not valid");
+	}
         this.game = game;
         stage = new Stage(new StretchViewport(GameScreen.V_WIDTH, GameScreen.V_HEIGHT), game.getSpritebatch());
         rootTable = new Table();
