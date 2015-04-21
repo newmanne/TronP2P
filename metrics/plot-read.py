@@ -60,6 +60,3 @@ plt.ylabel("Average # Bytes Read per Round")
 plt.legend(loc='upper left')
 
 plt.show()
-
-# write throughput (TODO, for project report)
-

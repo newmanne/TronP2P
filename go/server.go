@@ -22,15 +22,16 @@ var leaderState LeaderState
 var electionState = NORMAL
 var lastTime time.Time
 
-var DISABLE_GAME_OVER = false // to allow single player game for debugging
+var DISABLE_GAME_OVER = true // to allow single player game for debugging
 var COLLISION_IS_DEATH = true
 var MIN_GAME_SPEED = 1000 / 40 * time.Millisecond        // time between every new java move
 var FOLLOWER_RESPONSE_TIME = 500 * 4 * time.Millisecond  // time for followers to respond
 var MAX_ALLOWABLE_MISSED_MESSAGES = 5                    // max number of consecutive missed messages
 var FOLLOWER_RESPONSE_FAIL_RATE = map[string]int{"1": 0} // out of 1000, fail rate for responses not to be received
-var METRICS = false                                       // disable metrics
+var METRICS = true                                       // disable metrics
 var ROUND_LATENCY_FILENAME = "C:/cygwin64/home/Sam/TronP2P/metrics/roundLatency.csv"
 var READ_THROUGHPUT_FILENAME = "C:/cygwin64/home/Sam/TronP2P/metrics/readThroughput.csv"
+var WRITE_THROUGHPUT_FILENAME = "C:/cygwin64/home/Sam/TronP2P/metrics/writeThroughput.csv"
 
 var DIRECTIONS = [...]string{"DOWN", "LEFT", "UP", "RIGHT"}
 
@@ -278,6 +279,20 @@ func recordReadThroughput(n int) {
 	writer.Flush()
 }
 
+func recordWriteThroughput(n int) {
+	if !METRICS {
+		return
+	}
+	csvfile, err := os.OpenFile(WRITE_THROUGHPUT_FILENAME, os.O_APPEND|os.O_WRONLY, 0600)
+	defer csvfile.Close()
+	writer := csv.NewWriter(csvfile)
+
+	err = writer.Write([]string{strconv.Itoa(gameState.Round),
+		strconv.Itoa(gameState.MyPid), strconv.Itoa(n)})
+	checkError(err)
+	writer.Flush()
+}
+
 /*
 * MESSAGE UTILITIES
  */
@@ -350,6 +365,7 @@ func getMoves(buf []byte) (moves []interface{}) {
 func broadcastMessage(conn *net.UDPConn, message []byte) {
 	for _, addr := range gameState.AddrToAddr {
 		_, err := conn.WriteToUDP(message, addr)
+		recordWriteThroughput(len(message))
 		checkError(err)
 		logLeader("Sent message " + string(message) + " to player " + addr.String())
 	}
@@ -498,7 +514,7 @@ func initializeLeaderConnection() {
 func contactLeader() {
 	initializeConnection()
 	initializeLeaderConnection()
-	fmt.Println("Sending a hello message to the leader", addressState.leaderAddr, addressState.goConnection.LocalAddr(),addressState.goConnection.RemoteAddr())
+	fmt.Println("Sending a hello message to the leader", addressState.leaderAddr, addressState.goConnection.LocalAddr(), addressState.goConnection.RemoteAddr())
 	_, err := addressState.goConnection.WriteToUDP([]byte("JOIN:"+gameState.Nickname),
 		addressState.leaderUDPAddr)
 	fmt.Println("hellu")
@@ -600,9 +616,12 @@ func initializePerformanceMetrics() {
 	checkError(err)
 	defer latencyFile.Close()
 
-	overheadFile, err := os.Create(READ_THROUGHPUT_FILENAME)
+	readFile, err := os.Create(READ_THROUGHPUT_FILENAME)
 	checkError(err)
-	defer overheadFile.Close()
+	defer readFile.Close()
+
+	writeFile, err := os.Create(WRITE_THROUGHPUT_FILENAME)
+	defer writeFile.Close()
 
 	lastTime = time.Now()
 }
@@ -940,6 +959,7 @@ func goClient(wg sync.WaitGroup) {
 			addressState.recvChan <- buf
 			message := <-addressState.sendChan
 			_, err := addressState.goConnection.WriteToUDP([]byte(message), addressState.leaderUDPAddr)
+			recordWriteThroughput(len(message))
 			checkError(err)
 			break
 		case "moves":
@@ -999,6 +1019,7 @@ func goClient(wg sync.WaitGroup) {
 			byt := encodeMessage(message)
 			logLeader("Sent message " + string(byt))
 			_, err := addressState.goConnection.WriteToUDP(byt, raddr)
+			recordWriteThroughput(len(byt))
 			checkError(err)
 			break
 		case "leaderalive", "leaderdead":
