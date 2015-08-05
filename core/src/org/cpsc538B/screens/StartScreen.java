@@ -47,12 +47,6 @@ public class StartScreen extends ScreenAdapter {
 
 
     public StartScreen(TronP2PGame game) {
-	try {
-	    String localHost = InetAddress.getLocalHost().getHostAddress();
-	    DEFAULT_IP = localHost + ":8081";
-	} catch (UnknownHostException e ) {
-	    System.out.println("Address not valid");
-	}
         this.game = game;
         stage = new Stage(new StretchViewport(GameScreen.V_WIDTH, GameScreen.V_HEIGHT), game.getSpritebatch());
         rootTable = new Table();

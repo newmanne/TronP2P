@@ -60,7 +60,7 @@ public class GoSender implements Disposable {
         new Thread(() -> {
             try {
                 Runtime r = Runtime.getRuntime();
-                final ProcessBuilder processBuilder = new ProcessBuilder("go", "run", "../../go/server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader), Integer.toString(GameScreen.GRID_WIDTH), Integer.toString(GameScreen.GRID_HEIGHT), nickname);
+                final ProcessBuilder processBuilder = new ProcessBuilder("go", "run", "../../server.go", Integer.toString(serverSocket.getLocalPort()), masterAddress, Boolean.toString(leader), Integer.toString(GameScreen.GRID_WIDTH), Integer.toString(GameScreen.GRID_HEIGHT), nickname);
                 Gdx.app.log(TronP2PGame.LOG_TAG, "Running the following command:" + System.lineSeparator() + processBuilder.command() + System.lineSeparator());
                 goProcess = processBuilder.start();
 
